@@ -1,9 +1,9 @@
 "use client";
 
 import { addDoc, deleteDoc, updateDoc } from "firebase/firestore";
-import { peopleCollection, personDoc } from "../../../lib/queries";
-import { Person } from "../../../types/family";
-import { useAuth } from "../../../features/auth/hooks/useAuth";
+import { peopleCollection, personDoc } from "@/src/lib/queries";
+import { Person } from "@/src/types/family";
+import { useAuth } from "@/src/features/auth/hooks/useAuth";
 
 type NewPerson = Omit<Person, "id" | "marriageIds" | "createdBy" | "createdAt" | "updatedAt">;
 
@@ -13,7 +13,7 @@ export function usePersonMutations() {
   async function addPerson(data: NewPerson) {
     const docRef = await addDoc(peopleCollection(), {
       ...data,
-      id: "", // overwritten by converter/Firestore doc id; not stored
+      id: "",
       marriageIds: [],
       createdBy: user?.email ?? "unknown",
       createdAt: Date.now(),

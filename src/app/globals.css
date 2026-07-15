@@ -24,3 +24,11 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+.react-flow__controls-button {
+  background: #ffffff !important;
+  border-bottom: 1px solid #ccc !important;
+}
+
+.react-flow__controls-button svg {
+  fill: #000000 !important;
+}

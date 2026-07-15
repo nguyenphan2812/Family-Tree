@@ -1,7 +1,7 @@
 "use client";
 
 import { addDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from "firebase/firestore";
-import { marriagesCollection, marriageDoc, personDoc } from "../../../lib/queries";
+import { marriagesCollection, marriageDoc, personDoc } from "@/src/lib/queries";
 import { MarriageStatus } from "@/src/types/family";
 
 export function useMarriageMutations() {
@@ -48,5 +48,27 @@ export function useMarriageMutations() {
     await deleteDoc(marriageDoc(marriageId));
   }
 
-  return { createMarriage, addChildToMarriage, deleteMarriage };
+  // Removes a person from every marriage they're part of (as spouse or child),
+  // deleting any marriage that becomes fully empty as a result.
+  async function removePersonFromAllMarriages(personId: string, allMarriages: { id: string; spouseIds: string[]; childrenIds: string[] }[]) {
+    const affected = allMarriages.filter(
+      (m) => m.spouseIds.includes(personId) || m.childrenIds.includes(personId)
+    );
+
+    for (const marriage of affected) {
+      const newSpouseIds = marriage.spouseIds.filter((id) => id !== personId);
+      const newChildrenIds = marriage.childrenIds.filter((id) => id !== personId);
+
+      if (newSpouseIds.length === 0 && newChildrenIds.length === 0) {
+        await deleteDoc(marriageDoc(marriage.id));
+      } else {
+        await updateDoc(marriageDoc(marriage.id), {
+          spouseIds: newSpouseIds,
+          childrenIds: newChildrenIds,
+        });
+      }
+    }
+  }
+
+  return { createMarriage, addChildToMarriage, deleteMarriage, removePersonFromAllMarriages };
 }

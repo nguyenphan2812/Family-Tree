@@ -13,6 +13,7 @@ export interface Person {
   photoURL?: string;
   bio?: string;
   marriageIds: string[];
+  position?: { x: number; y: number };
   createdBy?: string;
   createdAt?: number;
   updatedAt?: number;
