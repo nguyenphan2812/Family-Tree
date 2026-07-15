@@ -11,7 +11,6 @@ interface TreeContextValue {
   onAddTree: (data: PersonFormData) => void;
   openAddModal: (onSubmit: (data: PersonFormData) => void) => void;
   onEditPerson: (personId: string) => void;
-  onExpandStack: (personId: string) => void;
 }
 
 export const TreeContext = createContext<TreeContextValue | null>(null);

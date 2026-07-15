@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ReactFlow, ReactFlowProvider, Background, Controls, useReactFlow } from "@xyflow/react";
+import { useCallback, useEffect, useState } from "react";
+import { Node, Edge, ReactFlow, ReactFlowProvider, Background, Controls, useReactFlow } from "@xyflow/react";
 import { usePeople } from "@/src/features/person/hooks/usePeople";
 import { usePersonMutations } from "@/src/features/person/hooks/usePersonMutations";
 import { useMarriages } from "@/src/features/marriage/hooks/useMarriages";
@@ -12,9 +12,9 @@ import { PersonNode } from "../context/PersonNode";
 import { UnionNode } from "./UnionNode";
 import { TreeContext } from "../context/TreeContext";
 import { PersonFormModal, PersonFormData } from "./PersonFormModal";
-import { SpouseStackNode } from "./SpouseStackNode";
+import { layoutGraph } from "../utils/layoutGraph";
 
-const nodeTypes = { person: PersonNode, union: UnionNode, spouseStack: SpouseStackNode };
+const nodeTypes = { person: PersonNode, union: UnionNode };
 
 function TreeCanvasInner() {
   const { people, loading: peopleLoading } = usePeople();
@@ -27,21 +27,26 @@ function TreeCanvasInner() {
   const [pendingSubmit, setPendingSubmit] = useState<((data: PersonFormData) => void) | null>(null);
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
 
-  const { nodes, edges } = useMemo(() => buildGraph(people, marriages), [people, marriages]);
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+
+  useEffect(() => {
+    const { nodes: rawNodes, edges: rawEdges } = buildGraph(people, marriages);
+    layoutGraph(rawNodes, rawEdges).then((positionedNodes) => {
+      setNodes(positionedNodes);
+      setEdges(rawEdges);
+    });
+  }, [people, marriages]);
 
   useEffect(() => {
     if (nodes.length > 0) {
-      const timeout = setTimeout(() => fitView({ padding: 0.4, duration: 400 }), 50);
+      const timeout = setTimeout(() => fitView({ padding: 0.4, duration: 400 }), 100);
       return () => clearTimeout(timeout);
     }
-  }, [nodes.length, fitView]);
+  }, [nodes, fitView]);
 
   const openAddModal = useCallback((onSubmit: (data: PersonFormData) => void) => {
     setPendingSubmit(() => onSubmit);
-  }, []);
-
-  const handleExpandStack = useCallback((personId: string) => {
-    // Placeholder callback for expanding spouse stacks in the tree context.
   }, []);
 
   const handleModalSubmit = useCallback(
@@ -54,7 +59,7 @@ function TreeCanvasInner() {
 
   const handleAddTree = useCallback(
     async (data: PersonFormData) => {
-      await addPerson({ ...data, position: { x: 0, y: 0 } });
+      await addPerson({ ...data });
     },
     [addPerson]
   );
@@ -62,11 +67,9 @@ function TreeCanvasInner() {
   const handleAddCard = useCallback(
     async (personId: string, direction: "top" | "bottom" | "left" | "right", data: PersonFormData) => {
       const person = people.find((p) => p.id === personId);
-      const basePos = person?.position ?? { x: 0, y: 0 };
 
       if (direction === "left" || direction === "right") {
-        const offset = direction === "right" ? 240 : -240;
-        const newId = await addPerson({ ...data, position: { x: basePos.x + offset, y: basePos.y } });
+        const newId = await addPerson({ ...data });
         const order = (person?.marriageIds.length ?? 0) + 1;
         await createMarriage({ spouseIds: [personId, newId], order });
       }
@@ -74,20 +77,17 @@ function TreeCanvasInner() {
       if (direction === "bottom") {
         const existingMarriages = marriages.filter((m) => m.spouseIds.includes(personId));
         let marriageId: string;
-        let childCount = 0;
         if (existingMarriages.length > 0) {
-          const latest = existingMarriages.sort((a, b) => b.order - a.order)[0];
-          marriageId = latest.id;
-          childCount = latest.childrenIds.length;
+          marriageId = existingMarriages.sort((a, b) => b.order - a.order)[0].id;
         } else {
           marriageId = await createMarriage({ spouseIds: [personId], order: 1, isPlaceholder: true });
         }
-        const newId = await addPerson({ ...data, position: { x: basePos.x + childCount * 160, y: basePos.y + 180 } });
+        const newId = await addPerson({ ...data });
         await addChildToMarriage(marriageId, newId);
       }
 
       if (direction === "top") {
-        const newId = await addPerson({ ...data, position: { x: basePos.x, y: basePos.y - 180 } });
+        const newId = await addPerson({ ...data });
         const marriageId = await createMarriage({ spouseIds: [newId], order: 1, isPlaceholder: true });
         await addChildToMarriage(marriageId, personId);
       }
@@ -143,7 +143,6 @@ function TreeCanvasInner() {
         onAddTree: handleAddTree,
         openAddModal,
         onEditPerson: setEditingPersonId,
-        onExpandStack: handleExpandStack,
       }}
     >
       <div style={{ height: "100vh", background: "#FFEBCD" }}>
