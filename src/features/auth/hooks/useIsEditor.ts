@@ -5,8 +5,6 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../lib/firebase";
 import { useAuth } from "./useAuth";
 
-const FAMILY_ID = process.env.NEXT_PUBLIC_FAMILY_ID!;
-
 export function useIsEditor() {
   const { user, loading: authLoading } = useAuth();
   const [isEditor, setIsEditor] = useState(false);
@@ -14,13 +12,14 @@ export function useIsEditor() {
 
   useEffect(() => {
     async function checkEditor() {
-      if (!user) {
+      const familyId = process.env.NEXT_PUBLIC_FAMILY_ID;
+      if (!user || !familyId) {
         setIsEditor(false);
         setChecking(false);
         return;
       }
 
-      const familyRef = doc(db, "families", FAMILY_ID);
+      const familyRef = doc(db, "families", familyId);
       const familySnap = await getDoc(familyRef);
       const editorEmails: string[] = familySnap.data()?.editorEmails ?? [];
 

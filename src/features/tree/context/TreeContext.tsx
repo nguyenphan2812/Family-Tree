@@ -3,14 +3,16 @@
 import { createContext, useContext } from "react";
 import { PersonFormData } from "../components/PersonFormModal";
 
-type Direction = "top" | "bottom" | "left" | "right";
-
 interface TreeContextValue {
   isEditor: boolean;
-  onAddCard: (personId: string, direction: Direction, data: PersonFormData) => void;
-  onAddTree: (data: PersonFormData) => void;
-  openAddModal: (onSubmit: (data: PersonFormData) => void) => void;
   onEditPerson: (personId: string) => void;
+  onAddParent: (childPersonId: string) => void;
+  onAddSpouse: (personId: string) => void;
+  onAddChildToPerson: (parentPersonId: string) => void;
+  onAddChildToMarriage: (marriageId: string) => void;
+  onToggleCollapseMarriage: (marriageId: string) => void;
+  onSelectPerson: (personId: string) => void;
+  onAddTree: (data: PersonFormData) => void;
 }
 
 export const TreeContext = createContext<TreeContextValue | null>(null);

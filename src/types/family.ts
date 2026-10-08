@@ -14,6 +14,9 @@ export interface Person {
   bio?: string;
   marriageIds: string[];
   position?: { x: number; y: number };
+  generation?: number;
+  birthOrder?: number;
+  spouseLabel?: string;
   createdBy?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -25,6 +28,7 @@ export interface Marriage {
   id: string;
   spouseIds: string[]; // usually 2; can be 1 for "unknown spouse" placeholder
   order: number; // 1 = first marriage, 2 = second, etc.
+  orderLabel?: string; // e.g. "Bà Cả (Chính thất)", "Bà Hai", "Chồng trước"...
   status: MarriageStatus;
   date?: string;
   childrenIds: string[];

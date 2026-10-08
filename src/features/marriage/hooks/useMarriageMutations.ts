@@ -8,19 +8,30 @@ export function useMarriageMutations() {
   async function createMarriage(params: {
     spouseIds: string[];
     order: number;
+    orderLabel?: string;
     status?: MarriageStatus;
     date?: string;
     isPlaceholder?: boolean;
+    childrenIds?: string[];
   }) {
-    const { spouseIds, order, status = "married", date, isPlaceholder = false } = params;
+    const {
+      spouseIds,
+      order,
+      orderLabel,
+      status = "married",
+      date,
+      isPlaceholder = false,
+      childrenIds = [],
+    } = params;
 
     const docRef = await addDoc(marriagesCollection(), {
       id: "",
       spouseIds,
       order,
+      orderLabel,
       status,
       date,
-      childrenIds: [],
+      childrenIds,
       isPlaceholder,
     });
 
@@ -31,6 +42,16 @@ export function useMarriageMutations() {
     );
 
     return docRef.id;
+  }
+
+  async function addSpouseToMarriage(marriageId: string, spouseId: string) {
+    await updateDoc(marriageDoc(marriageId), {
+      spouseIds: arrayUnion(spouseId),
+      isPlaceholder: false,
+    });
+    await updateDoc(personDoc(spouseId), {
+      marriageIds: arrayUnion(marriageId),
+    });
   }
 
   async function addChildToMarriage(marriageId: string, childId: string) {
@@ -70,5 +91,11 @@ export function useMarriageMutations() {
     }
   }
 
-  return { createMarriage, addChildToMarriage, deleteMarriage, removePersonFromAllMarriages };
+  return {
+    createMarriage,
+    addSpouseToMarriage,
+    addChildToMarriage,
+    deleteMarriage,
+    removePersonFromAllMarriages,
+  };
 }

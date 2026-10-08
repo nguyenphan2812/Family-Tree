@@ -9,6 +9,8 @@ export interface PersonFormData {
   deathDate: string;
   gender: "male" | "female" | "other";
   bio: string;
+  spouseLabel?: string;
+  birthOrder?: number;
 }
 
 interface Props {
@@ -24,13 +26,26 @@ export function PersonFormModal({ initialData, onSubmit, onCancel, onDelete }: P
   const [birthDate, setBirthDate] = useState(initialData?.birthDate ?? "");
   const [deathDate, setDeathDate] = useState(initialData?.deathDate ?? "");
   const [gender, setGender] = useState<"male" | "female" | "other">(initialData?.gender ?? "male");
+  const [spouseLabel, setSpouseLabel] = useState(initialData?.spouseLabel ?? "");
+  const [birthOrder, setBirthOrder] = useState<string>(
+    initialData?.birthOrder ? String(initialData.birthOrder) : ""
+  );
   const [bio, setBio] = useState(initialData?.bio ?? "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!firstName.trim()) return;
-    onSubmit({ firstName, lastName, birthDate, deathDate, gender, bio });
+    onSubmit({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      birthDate,
+      deathDate,
+      gender,
+      bio,
+      spouseLabel: spouseLabel.trim() || undefined,
+      birthOrder: birthOrder ? Number(birthOrder) : undefined,
+    });
   }
 
   return (
@@ -63,10 +78,33 @@ export function PersonFormModal({ initialData, onSubmit, onCancel, onDelete }: P
         <input type="date" value={deathDate} onChange={(e) => setDeathDate(e.target.value)} style={inputStyle} />
 
         <select value={gender} onChange={(e) => setGender(e.target.value as "male" | "female" | "other")} style={inputStyle}>
-          <option value="male">Male</option>
-          <option value="female">Female</option>
-          <option value="other">Other</option>
+          <option value="male">Male (Nam)</option>
+          <option value="female">Female (Nữ)</option>
+          <option value="other">Other (Khác)</option>
         </select>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div>
+            <label style={labelStyle}>Vai vế / Danh xưng</label>
+            <input
+              placeholder="VD: Bà Cả, Bà Hai"
+              value={spouseLabel}
+              onChange={(e) => setSpouseLabel(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <label style={labelStyle}>Con thứ mấy</label>
+            <input
+              type="number"
+              min={1}
+              placeholder="VD: 1, 2, 3"
+              value={birthOrder}
+              onChange={(e) => setBirthOrder(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+        </div>
 
         <textarea placeholder="Bio / notes" value={bio} onChange={(e) => setBio(e.target.value)} style={{ ...inputStyle, minHeight: 70, resize: "vertical" }} />
 
