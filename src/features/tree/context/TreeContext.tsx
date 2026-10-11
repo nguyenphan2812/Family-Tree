@@ -7,12 +7,13 @@ interface TreeContextValue {
   isEditor: boolean;
   onEditPerson: (personId: string) => void;
   onAddParent: (childPersonId: string) => void;
-  onAddSpouse: (personId: string) => void;
+  onAddSpouse: (personId: string, direction?: "left" | "right") => void;
   onAddChildToPerson: (parentPersonId: string) => void;
   onAddChildToMarriage: (marriageId: string) => void;
   onToggleCollapseMarriage: (marriageId: string) => void;
   onSelectPerson: (personId: string) => void;
   onAddTree: (data: PersonFormData) => void;
+  onRequireAuth: () => void;
 }
 
 export const TreeContext = createContext<TreeContextValue | null>(null);

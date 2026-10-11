@@ -16,6 +16,7 @@ import { usePersonMutations } from "@/src/features/person/hooks/usePersonMutatio
 import { useMarriages } from "@/src/features/marriage/hooks/useMarriages";
 import { useMarriageMutations } from "@/src/features/marriage/hooks/useMarriageMutations";
 import { useIsEditor } from "@/src/features/auth/hooks/useIsEditor";
+import { useAuth } from "@/src/features/auth/hooks/useAuth";
 import { buildGraph } from "../utils/buildGraph";
 import { PersonNode } from "../context/PersonNode";
 import { UnionNode } from "./UnionNode";
@@ -27,6 +28,8 @@ import { SelectSpouseForChildModal } from "./SelectSpouseForChildModal";
 import { TreeSearchBar } from "./TreeSearchBar";
 import { layoutGraph, PERSON_NODE_WIDTH, PERSON_NODE_HEIGHT } from "../utils/layoutGraph";
 import { Person, Marriage } from "@/src/types/family";
+import { deleteDoc } from "firebase/firestore";
+import { marriageDoc } from "@/src/lib/queries";
 
 const nodeTypes = { person: PersonNode, union: UnionNode };
 
@@ -41,6 +44,7 @@ function TreeCanvasInner() {
     removePersonFromAllMarriages,
   } = useMarriageMutations();
   const { isEditor, user } = useIsEditor();
+  const { signIn, logOut } = useAuth();
   const { fitView, setCenter } = useReactFlow();
 
   // State
@@ -53,9 +57,12 @@ function TreeCanvasInner() {
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
   const [addingParentForChildId, setAddingParentForChildId] = useState<string | null>(null);
   const [addingSpouseForPersonId, setAddingSpouseForPersonId] = useState<string | null>(null);
+  const [addingSpouseDirection, setAddingSpouseDirection] = useState<"left" | "right">("right");
   const [selectingSpouseForChildParentId, setSelectingSpouseForChildParentId] = useState<string | null>(null);
   const [addingChildTargetMarriageId, setAddingChildTargetMarriageId] = useState<string | null>(null);
   const [isAddingRootTree, setIsAddingRootTree] = useState(false);
+  const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Layout calculation
   const { graphNodes, graphEdges, personGenerations } = useMemo(() => {
@@ -178,8 +185,9 @@ function TreeCanvasInner() {
   );
 
   // 2. Sideways Expansion: Thêm Phối ngẫu (Vợ / Chồng)
-  const handleOpenAddSpouse = useCallback((personId: string) => {
+  const handleOpenAddSpouse = useCallback((personId: string, direction: "left" | "right" = "right") => {
     setAddingSpouseForPersonId(personId);
+    setAddingSpouseDirection(direction);
   }, []);
 
   const handleSaveSpouse = useCallback(
@@ -199,11 +207,12 @@ function TreeCanvasInner() {
         spouseIds: [addingSpouseForPersonId, newSpouseId],
         order: data.order,
         orderLabel: data.orderLabel,
+        direction: addingSpouseDirection,
       });
 
       setAddingSpouseForPersonId(null);
     },
-    [addingSpouseForPersonId, addPerson, createMarriage]
+    [addingSpouseForPersonId, addingSpouseDirection, addPerson, createMarriage]
   );
 
   // 3. Downward Expansion: Thêm Con
@@ -223,7 +232,7 @@ function TreeCanvasInner() {
           spouseIds: [parentPersonId],
           order: 1,
           isPlaceholder: true,
-        }).then((newMId) => {
+        }).then((newMId: string) => {
           setAddingChildTargetMarriageId(newMId);
         });
       } else if (personMarriages.length === 1) {
@@ -257,13 +266,30 @@ function TreeCanvasInner() {
   );
 
   // 4. Edit / Delete Person
+  const editingPerson = useMemo(() => {
+    if (!editingPersonId) return undefined;
+    const fromPeople = people.find((p) => p.id === editingPersonId);
+    if (fromPeople) return fromPeople;
+    const node = graphNodes.find((n) => n.id === editingPersonId);
+    return node?.data?.person as Person | undefined;
+  }, [editingPersonId, people, graphNodes]);
+
   const handleEditSave = useCallback(
     async (data: PersonFormData) => {
       if (!editingPersonId) return;
-      await updatePerson(editingPersonId, data);
+      if (editingPersonId.startsWith("placeholder-spouse-")) {
+        const marriageId = editingPersonId.replace("placeholder-spouse-", "");
+        const newPersonId = await addPerson({
+          ...data,
+          spouseLabel: data.spouseLabel || editingPerson?.spouseLabel,
+        });
+        await addSpouseToMarriage(marriageId, newPersonId);
+      } else {
+        await updatePerson(editingPersonId, data);
+      }
       setEditingPersonId(null);
     },
-    [editingPersonId, updatePerson]
+    [editingPersonId, editingPerson, addPerson, addSpouseToMarriage, updatePerson]
   );
 
   const handleEditDelete = useCallback(async () => {
@@ -282,7 +308,25 @@ function TreeCanvasInner() {
     [addPerson]
   );
 
-  const editingPerson = people.find((p) => p.id === editingPersonId);
+  // Reset / Clear all data for re-testing
+  const handleResetAllData = useCallback(async () => {
+    setIsResetting(true);
+    try {
+      for (const p of people) {
+        await deletePerson(p.id);
+      }
+      for (const m of marriages) {
+        await deleteDoc(marriageDoc(m.id));
+      }
+      setSelectedPersonId(null);
+      setShowConfirmReset(false);
+    } catch (err) {
+      console.error("Failed to reset tree data:", err);
+    } finally {
+      setIsResetting(false);
+    }
+  }, [people, marriages, deletePerson]);
+
   const childPersonForAddParent = people.find((p) => p.id === addingParentForChildId);
   const parentForAddSpouse = people.find((p) => p.id === addingSpouseForPersonId);
   const parentForSelectSpouse = people.find((p) => p.id === selectingSpouseForChildParentId);
@@ -292,6 +336,35 @@ function TreeCanvasInner() {
     if (!addingParentForChildId) return undefined;
     return marriages.find((m) => m.childrenIds.includes(addingParentForChildId));
   }, [addingParentForChildId, marriages]);
+
+  // Contextual info for adding child modal
+  const targetMarriageForAddChild = useMemo(() => {
+    if (!addingChildTargetMarriageId) return null;
+    return marriages.find((m) => m.id === addingChildTargetMarriageId) ?? null;
+  }, [addingChildTargetMarriageId, marriages]);
+
+  const childTargetParentsSummary = useMemo(() => {
+    if (!targetMarriageForAddChild) return "";
+    const parentPersons = targetMarriageForAddChild.spouseIds
+      .map((id) => people.find((p) => p.id === id))
+      .filter((p): p is Person => Boolean(p));
+    if (parentPersons.length === 0) return "";
+    return `Con của: ${parentPersons.map((p) => `${p.firstName} ${p.lastName}`).join(" & ")}`;
+  }, [targetMarriageForAddChild, people]);
+
+  const childTargetDefaultLastName = useMemo(() => {
+    if (!targetMarriageForAddChild) return "";
+    const parentPersons = targetMarriageForAddChild.spouseIds
+      .map((id) => people.find((p) => p.id === id))
+      .filter((p): p is Person => Boolean(p));
+    const father = parentPersons.find((p) => p.gender === "male");
+    return father?.lastName || parentPersons[0]?.lastName || "";
+  }, [targetMarriageForAddChild, people]);
+
+  const childTargetDefaultOrder = useMemo(() => {
+    if (!targetMarriageForAddChild) return 1;
+    return targetMarriageForAddChild.childrenIds.length + 1;
+  }, [targetMarriageForAddChild]);
 
   // Max generation count
   const maxGeneration = useMemo(() => {
@@ -316,7 +389,7 @@ function TreeCanvasInner() {
   if (people.length === 0) {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-300 p-4">
-        {isEditor ? (
+        {!user ? (
           <div className="flex flex-col items-center gap-4 text-center max-w-sm">
             <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-2xl shadow-inner">
               🌳
@@ -324,26 +397,62 @@ function TreeCanvasInner() {
             <div>
               <h2 className="text-lg font-semibold text-slate-100">Bắt đầu Cây Gia Phả</h2>
               <p className="text-xs text-slate-400 mt-1">
-                Chưa có ai trong cây. Hãy tạo người Thủy Tổ (Cụ Tổ) đầu tiên của dòng họ.
+                Cây gia phả hiện đang trống. Hãy đăng nhập tài khoản Editor để tạo người Thủy Tổ (Cụ Tổ) đầu tiên.
               </p>
             </div>
             <button
-              onClick={() => setIsAddingRootTree(true)}
-              className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-lg cursor-pointer transition"
+              onClick={() => signIn()}
+              className="px-5 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium text-xs shadow-lg cursor-pointer transition flex items-center gap-2"
             >
-              + Tạo Cụ Tổ (Bắt đầu cây)
+              🔑 Đăng nhập Google để bắt đầu
             </button>
+          </div>
+        ) : isEditor ? (
+          <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+            <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-2xl shadow-inner">
+              🌳
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-100">Bắt đầu Cây Gia Phả</h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Đăng nhập: <span className="text-emerald-400 font-medium">{user.email}</span> (Quyền Editor)
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsAddingRootTree(true)}
+                className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-lg cursor-pointer transition"
+              >
+                + Tạo Cụ Tổ (Bắt đầu cây)
+              </button>
+              <button
+                onClick={() => logOut()}
+                className="px-3 py-2.5 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-400 text-xs cursor-pointer transition"
+              >
+                Đăng xuất
+              </button>
+            </div>
             {isAddingRootTree && (
               <PersonFormModal
+                title="Bắt đầu Cây Gia Phả (Thủy Tổ)"
+                subtitle="Tạo người đứng đầu cây gia phả"
+                submitLabel="Tạo Cụ Tổ"
                 onSubmit={handleAddTree}
                 onCancel={() => setIsAddingRootTree(false)}
               />
             )}
           </div>
         ) : (
-          <div className="text-center">
-            <p className="text-slate-400 text-sm">Cây gia phả chưa được khởi tạo.</p>
-            <p className="text-slate-600 text-xs mt-1">Chỉ Editor mới có quyền khởi tạo cây.</p>
+          <div className="flex flex-col items-center gap-3 text-center max-w-sm">
+            <p className="text-slate-300 text-sm">
+              Bạn đang đăng nhập là <strong className="text-white">{user.email}</strong>, nhưng tài khoản này chưa có trong danh sách Editor.
+            </p>
+            <button
+              onClick={() => logOut()}
+              className="px-4 py-2 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs cursor-pointer transition"
+            >
+              Đăng xuất và đăng nhập tài khoản khác
+            </button>
           </div>
         )}
       </div>
@@ -362,6 +471,7 @@ function TreeCanvasInner() {
         onToggleCollapseMarriage: handleToggleCollapseMarriage,
         onSelectPerson: handleSelectPerson,
         onAddTree: handleAddTree,
+        onRequireAuth: signIn,
       }}
     >
       <div className="relative w-full h-screen bg-slate-950">
@@ -376,8 +486,8 @@ function TreeCanvasInner() {
             />
           </div>
 
-          {/* Right: Stats & Actions */}
-          <div className="pointer-events-auto flex items-center gap-2 bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-1.5 shadow-lg backdrop-blur-md text-xs text-slate-300">
+          {/* Right: Stats, Reset & Auth */}
+          <div className="pointer-events-auto flex items-center gap-2.5 bg-slate-900/95 border border-slate-700 rounded-lg px-3 py-1.5 shadow-xl backdrop-blur-md text-xs text-slate-300">
             <span className="font-medium text-slate-100">{people.length}</span> người
             <span className="text-slate-600">•</span>
             <span className="font-medium text-amber-300">{maxGeneration}</span> thế hệ
@@ -397,13 +507,44 @@ function TreeCanvasInner() {
                 Thu gọn các nhánh
               </button>
             )}
-            {isEditor && (
-              <>
-                <span className="text-slate-600">•</span>
+
+            <span className="text-slate-600">•</span>
+            {/* Always visible Reset Button */}
+            <button
+              onClick={() => {
+                if (!user) {
+                  signIn();
+                } else {
+                  setShowConfirmReset(true);
+                }
+              }}
+              className="px-2.5 py-1 rounded bg-red-950/90 hover:bg-red-900 border border-red-700/80 text-red-300 hover:text-red-100 text-[11px] font-medium flex items-center gap-1 cursor-pointer transition shadow"
+              title="Xóa toàn bộ dữ liệu để test lại từ đầu"
+            >
+              🗑️ Xóa dữ liệu (Reset)
+            </button>
+
+            <span className="text-slate-600">•</span>
+            {/* User status & Login */}
+            {!user ? (
+              <button
+                onClick={() => signIn()}
+                className="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-medium text-[11px] flex items-center gap-1 cursor-pointer shadow transition"
+              >
+                🔑 Đăng nhập Google
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800 px-1.5 py-0.5 rounded">
-                  Editor: {user?.email}
+                  {user.email}
                 </span>
-              </>
+                <button
+                  onClick={() => logOut()}
+                  className="text-[11px] text-slate-400 hover:text-slate-200 underline cursor-pointer ml-0.5"
+                >
+                  Đăng xuất
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -422,19 +563,30 @@ function TreeCanvasInner() {
         {/* Modal: Edit Person */}
         {editingPerson && (
           <PersonFormModal
+            title={
+              editingPerson.isPlaceholder
+                ? "Thêm thông tin Phối ngẫu"
+                : "Chỉnh sửa thông tin thành viên"
+            }
+            subtitle={
+              editingPerson.isPlaceholder
+                ? (editingPerson.spouseLabel || "Cập nhật thông tin phối ngẫu (khuyết danh)")
+                : `${editingPerson.firstName} ${editingPerson.lastName}`
+            }
+            submitLabel={editingPerson.isPlaceholder ? "Thêm phối ngẫu" : "Lưu thay đổi"}
             initialData={{
-              firstName: editingPerson.firstName,
-              lastName: editingPerson.lastName,
+              firstName: editingPerson.isPlaceholder ? "" : editingPerson.firstName,
+              lastName: editingPerson.isPlaceholder ? "" : editingPerson.lastName,
               birthDate: editingPerson.birthDate ?? "",
               deathDate: editingPerson.deathDate ?? "",
-              gender: editingPerson.gender ?? "male",
+              gender: editingPerson.gender ?? "female",
               bio: editingPerson.bio ?? "",
               spouseLabel: editingPerson.spouseLabel,
               birthOrder: editingPerson.birthOrder,
             }}
             onSubmit={handleEditSave}
             onCancel={() => setEditingPersonId(null)}
-            onDelete={handleEditDelete}
+            onDelete={editingPerson.isPlaceholder ? undefined : handleEditDelete}
           />
         )}
 
@@ -457,6 +609,7 @@ function TreeCanvasInner() {
               .filter((m) => m.spouseIds.includes(parentForAddSpouse.id))
               .sort((a, b) => a.order - b.order)}
             people={people}
+            direction={addingSpouseDirection}
             onSubmit={handleSaveSpouse}
             onCancel={() => setAddingSpouseForPersonId(null)}
           />
@@ -486,9 +639,61 @@ function TreeCanvasInner() {
         {/* Modal: Downward Expansion (Add Child to specific marriage) */}
         {addingChildTargetMarriageId && (
           <PersonFormModal
+            title="Thêm Con (Hậu duệ)"
+            subtitle={childTargetParentsSummary || "Thêm con vào gia đình"}
+            submitLabel="Thêm con"
+            initialData={{
+              firstName: "",
+              lastName: childTargetDefaultLastName,
+              birthDate: "",
+              deathDate: "",
+              gender: "male",
+              bio: "",
+              birthOrder: childTargetDefaultOrder,
+            }}
             onSubmit={handleSaveChild}
             onCancel={() => setAddingChildTargetMarriageId(null)}
           />
+        )}
+
+        {/* Modal: Confirm Reset All Data */}
+        {showConfirmReset && (
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4"
+            onClick={() => setShowConfirmReset(false)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-slate-900 border border-red-800/80 rounded-xl p-6 w-full max-w-sm flex flex-col gap-4 text-slate-100 shadow-2xl"
+            >
+              <div className="flex items-center gap-2.5 text-red-400">
+                <span className="text-xl">⚠️</span>
+                <h3 className="font-semibold text-base">Xóa toàn bộ dữ liệu cây?</h3>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Hành động này sẽ xóa vĩnh viễn <strong className="text-white">{people.length} người</strong> và{" "}
+                <strong className="text-white">{marriages.length} cuộc hôn nhân</strong> hiện tại trong cơ sở dữ liệu để bạn có thể test lại từ đầu.
+              </p>
+              <div className="flex gap-2.5 mt-2">
+                <button
+                  type="button"
+                  disabled={isResetting}
+                  onClick={() => setShowConfirmReset(false)}
+                  className="flex-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 text-xs hover:bg-slate-800 cursor-pointer disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={isResetting}
+                  onClick={handleResetAllData}
+                  className="flex-1 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium text-xs cursor-pointer shadow disabled:opacity-50 flex items-center justify-center gap-1"
+                >
+                  {isResetting ? "Đang xóa..." : "Xác nhận xóa"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </TreeContext.Provider>

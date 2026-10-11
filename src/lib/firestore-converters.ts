@@ -64,6 +64,7 @@ export const marriageConverter: FirestoreDataConverter<Marriage> = {
       date: marriage.date,
       childrenIds: marriage.childrenIds,
       isPlaceholder: marriage.isPlaceholder,
+      direction: marriage.direction,
     });
   },
   fromFirestore(snapshot: QueryDocumentSnapshot): Marriage {
@@ -77,6 +78,7 @@ export const marriageConverter: FirestoreDataConverter<Marriage> = {
       date: data.date,
       childrenIds: data.childrenIds ?? [],
       isPlaceholder: data.isPlaceholder ?? false,
+      direction: data.direction,
     };
   },
 };

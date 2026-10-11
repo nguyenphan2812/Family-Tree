@@ -8,6 +8,7 @@ interface Props {
   person: Person;
   existingMarriages: Marriage[];
   people: Person[];
+  direction?: "left" | "right";
   onSubmit: (data: {
     spouseData: PersonFormData;
     order: number;
@@ -20,6 +21,7 @@ export function AddSpouseModal({
   person,
   existingMarriages,
   people,
+  direction = "right",
   onSubmit,
   onCancel,
 }: Props) {

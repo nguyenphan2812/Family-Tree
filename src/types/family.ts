@@ -17,6 +17,7 @@ export interface Person {
   generation?: number;
   birthOrder?: number;
   spouseLabel?: string;
+  isPlaceholder?: boolean;
   createdBy?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -33,4 +34,5 @@ export interface Marriage {
   date?: string;
   childrenIds: string[];
   isPlaceholder?: boolean; // true for auto-created "unknown spouse" unions
+  direction?: "left" | "right";
 }

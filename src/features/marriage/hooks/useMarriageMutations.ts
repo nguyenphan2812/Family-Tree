@@ -13,6 +13,7 @@ export function useMarriageMutations() {
     date?: string;
     isPlaceholder?: boolean;
     childrenIds?: string[];
+    direction?: "left" | "right";
   }) {
     const {
       spouseIds,
@@ -22,6 +23,7 @@ export function useMarriageMutations() {
       date,
       isPlaceholder = false,
       childrenIds = [],
+      direction = "right",
     } = params;
 
     const docRef = await addDoc(marriagesCollection(), {
@@ -33,6 +35,7 @@ export function useMarriageMutations() {
       date,
       childrenIds,
       isPlaceholder,
+      direction,
     });
 
     await Promise.all(

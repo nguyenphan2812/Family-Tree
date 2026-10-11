@@ -14,10 +14,20 @@ export function PersonDetailsPopup({ person }: { person: Person }) {
   return (
     <div
       style={{
-        position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)",
-        marginTop: 10, width: 200, background: "#1c1e24", border: "1px solid #3a3c42",
-        borderRadius: 10, padding: 12, color: "#eee", fontSize: 12, zIndex: 20,
-        pointerEvents: "none", textAlign: "left",
+        position: "absolute",
+        top: 0,
+        left: "105%",
+        width: 200,
+        background: "#1c1e24",
+        border: "1px solid #3a3c42",
+        borderRadius: 10,
+        padding: 12,
+        color: "#eee",
+        fontSize: 12,
+        zIndex: 50,
+        pointerEvents: "none",
+        textAlign: "left",
+        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.5)",
       }}
     >
       <div style={{ fontWeight: 500, marginBottom: 4 }}>{person.firstName} {person.lastName}</div>

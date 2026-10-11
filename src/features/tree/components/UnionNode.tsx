@@ -11,15 +11,17 @@ interface UnionNodeData {
   totalChildrenCount: number;
   visibleChildrenCount: number;
   isCollapsed: boolean;
+  color?: string;
 }
 
 export function UnionNode({ id: _id, data }: NodeProps) {
   const unionData = data as unknown as UnionNodeData;
-  const { marriage, totalChildrenCount, isCollapsed } = unionData;
+  const { marriage, totalChildrenCount, isCollapsed, color } = unionData;
   const { isEditor, onAddChildToMarriage, onToggleCollapseMarriage } = useTreeContext();
   const [hovered, setHovered] = useState(false);
 
   const hasChildren = totalChildrenCount > 0;
+  const accentColor = color || "#94a3b8";
 
   return (
     <div
@@ -48,21 +50,37 @@ export function UnionNode({ id: _id, data }: NodeProps) {
         style={{ opacity: 0, width: 4, height: 4 }}
       />
       <Handle
-        type="target"
+        type="source"
+        position={Position.Left}
+        id="left-source"
+        style={{ opacity: 0, width: 4, height: 4 }}
+      />
+      <Handle
+        type="source"
         position={Position.Right}
         id="right"
+        style={{ opacity: 0, width: 4, height: 4 }}
+      />
+      <Handle
+        type="target"
+        position={Position.Right}
+        id="right-target"
         style={{ opacity: 0, width: 4, height: 4 }}
       />
 
       {/* Union Badge */}
       <div
         className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium cursor-pointer shadow-sm transition-all ${
-          isCollapsed
-            ? "bg-amber-600 text-white border-2 border-amber-300 ring-2 ring-amber-500/30 scale-105"
-            : hasChildren
-            ? "bg-slate-700 text-slate-200 border border-slate-500 hover:border-slate-300"
-            : "bg-slate-800 text-slate-400 border border-slate-600"
+          isCollapsed ? "scale-105" : "hover:scale-110"
         }`}
+        style={{
+          backgroundColor: isCollapsed ? accentColor : "#090d16",
+          color: isCollapsed ? "#ffffff" : accentColor,
+          border: `2px solid ${accentColor}`,
+          boxShadow: isCollapsed
+            ? `0 0 12px ${accentColor}80`
+            : `0 0 8px ${accentColor}35`,
+        }}
         title={
           hasChildren
             ? `${totalChildrenCount} người con ${marriage.orderLabel ? `(${marriage.orderLabel})` : ""} - Click để ${isCollapsed ? "mở rộng" : "thu gọn"}`
