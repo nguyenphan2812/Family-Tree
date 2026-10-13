@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { useTreeContext } from "./TreeContext";
 import { Person } from "@/src/types/family";
@@ -24,21 +25,11 @@ export function PersonNode({ id, data }: NodeProps) {
   const generation = (data.generation as number) ?? 1;
   const isSelected = selectedPersonId === id || Boolean(data.isSelected);
   const isPlaceholder = Boolean(person.isPlaceholder);
-  const parentInfo = data.parentInfo as
-    | {
-        parentNames: string;
-        color: string;
-        order: number;
-        orderLabel?: string;
-        hasMultiMarriageParents: boolean;
-      }
-    | undefined;
-
   const isMale = person.gender === "male";
   const isFemale = person.gender === "female";
 
   const borderColor = isSelected
-    ? "border-amber-400 ring-2 ring-amber-400/60 shadow-amber-500/30 shadow-xl"
+    ? "border-amber-400 ring-2 ring-amber-400/70 shadow-amber-500/30 shadow-xl"
     : isPlaceholder
     ? "border-dashed border-amber-500/80 hover:border-amber-400 shadow-amber-950/20"
     : isMale
@@ -55,12 +46,28 @@ export function PersonNode({ id, data }: NodeProps) {
     ? "bg-rose-950/40"
     : "bg-slate-900/60";
 
+  const avatarRingColor = isSelected
+    ? "ring-2 ring-amber-400 border-amber-300"
+    : isPlaceholder
+    ? "border-amber-500/70 border-dashed"
+    : isMale
+    ? "ring-2 ring-sky-500/40 border-sky-400/80"
+    : isFemale
+    ? "ring-2 ring-rose-500/40 border-rose-400/80"
+    : "ring-2 ring-slate-600/40 border-slate-500";
+
   // Format short birth/death year
   const rawBirth = person.birthDate ? new Date(person.birthDate).getFullYear() : null;
   const rawDeath = person.deathDate ? new Date(person.deathDate).getFullYear() : null;
   const birthYear = rawBirth && !isNaN(rawBirth) ? rawBirth : null;
   const deathYear = rawDeath && !isNaN(rawDeath) ? rawDeath : null;
   const yearText = birthYear || deathYear ? `${birthYear ?? "?"} - ${deathYear ?? ""}` : null;
+
+  const displayName = isPlaceholder
+    ? `${person.firstName} ${person.lastName}`
+    : person.lastName
+    ? `${person.lastName} ${person.firstName}`
+    : person.firstName;
 
   // Show action buttons ONLY when hovered and NOT placeholder
   const showActionButtons = hovered && !isPlaceholder;
@@ -87,12 +94,10 @@ export function PersonNode({ id, data }: NodeProps) {
         onSelectPerson(id);
         if (isEditor) onEditPerson(id);
       }}
-      className={`relative rounded-xl border p-2.5 flex flex-col justify-between text-left cursor-pointer transition-all shadow-md bg-slate-900/95 backdrop-blur-sm ${genderBg} ${borderColor}`}
+      className={`relative rounded-2xl border p-2 flex flex-col items-center justify-between text-center cursor-pointer transition-all shadow-md bg-slate-900/95 backdrop-blur-sm ${genderBg} ${borderColor}`}
       style={{
         width: PERSON_NODE_WIDTH,
         height: PERSON_NODE_HEIGHT,
-        borderLeftColor: parentInfo?.hasMultiMarriageParents ? parentInfo.color : undefined,
-        borderLeftWidth: parentInfo?.hasMultiMarriageParents ? 3 : undefined,
       }}
     >
       {/* React Flow Handles */}
@@ -140,83 +145,78 @@ export function PersonNode({ id, data }: NodeProps) {
         style={{ opacity: 0, width: 8, height: 8 }}
       />
 
-      {/* Top Header: Generation badge & Role/Spouse label */}
-      <div className="flex items-center justify-between text-[10px] text-slate-400">
-        <span className="font-semibold text-amber-300/90 tracking-wide uppercase">
+      {/* Top Header: Generation badge & Spouse label */}
+      <div className="w-full flex items-center justify-between text-[9px] px-0.5">
+        <span className="font-bold text-amber-300 tracking-wider uppercase">
           Đời {generation}
         </span>
         {person.spouseLabel ? (
-          <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-medium truncate max-w-17.5">
+          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-medium truncate max-w-16">
             {person.spouseLabel}
           </span>
-        ) : person.birthOrder ? (
-          <span
-            className="px-1.5 py-0.2 rounded text-[9px] flex items-center gap-1 font-medium max-w-22.5"
-            style={{
-              backgroundColor: parentInfo?.hasMultiMarriageParents
-                ? `${parentInfo.color}25`
-                : "#1e293b",
-              color: parentInfo?.hasMultiMarriageParents
-                ? parentInfo.color
-                : "#cbd5e1",
-              border: parentInfo?.hasMultiMarriageParents
-                ? `1px solid ${parentInfo.color}50`
-                : undefined,
-            }}
-            title={
-              parentInfo?.parentNames
-                ? `Con thứ ${person.birthOrder} · Của ${parentInfo.parentNames}`
-                : `Con thứ ${person.birthOrder}`
-            }
-          >
-            {parentInfo?.hasMultiMarriageParents && (
-              <span
-                className="w-1.5 h-1.5 rounded-full shrink-0"
-                style={{ backgroundColor: parentInfo.color }}
-              />
-            )}
-            <span className="truncate">Con thứ {person.birthOrder}</span>
-          </span>
         ) : isPlaceholder ? (
-          <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-medium">
+          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-medium">
             Khuyết danh
           </span>
-        ) : null}
+        ) : (
+          <span />
+        )}
+      </div>
+
+      {/* Main Focus: Portrait Photo / Avatar Frame */}
+      <div className="relative my-0.5 group">
+        <div
+          className={`w-14 h-14 rounded-full overflow-hidden border-2 flex items-center justify-center bg-slate-950/80 shadow-md transition-transform group-hover:scale-105 ${avatarRingColor}`}
+        >
+          {person.photoURL ? (
+            <Image
+              src={person.photoURL}
+              alt={displayName}
+              width={56}
+              height={56}
+              unoptimized
+              className="w-full h-full object-cover"
+            />
+          ) : isPlaceholder ? (
+            <span className="text-xl text-amber-300/80">👤</span>
+          ) : (
+            <span className="text-2xl select-none">
+              {isMale ? "👨" : isFemale ? "👩" : "👤"}
+            </span>
+          )}
+        </div>
+
+        {/* Hover Camera Badge when Editor */}
+        {isEditor && hovered && (
+          <div
+            className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-[10px] text-slate-200 shadow-md"
+            title="Nhấn để đổi ảnh"
+          >
+            📷
+          </div>
+        )}
       </div>
 
       {/* Person Name */}
-      <div className="font-medium text-xs text-slate-100 truncate flex items-center gap-1">
-        <span>{isPlaceholder ? "👤" : isMale ? "👨" : isFemale ? "👩" : "👤"}</span>
-        <span className={`truncate ${isPlaceholder ? "text-amber-200/90 italic" : ""}`}>
-          {isPlaceholder
-            ? `${person.firstName} ${person.lastName}`
-            : person.lastName
-            ? `${person.lastName} ${person.firstName}`
-            : person.firstName}
-        </span>
+      <div className="w-full px-0.5">
+        <div
+          className={`font-semibold text-xs text-slate-100 truncate ${
+            isPlaceholder ? "text-amber-200/90 italic" : ""
+          }`}
+          title={displayName}
+        >
+          {displayName}
+        </div>
       </div>
 
-      {/* Bottom Dates & Parentage */}
-      <div className="text-[10px] text-slate-400 truncate flex items-center justify-between gap-1">
+      {/* Birth & Death Year */}
+      <div className="w-full text-[10px] text-slate-400 truncate px-0.5">
         {isPlaceholder ? (
-          <span className="text-amber-400/90 text-[10px] flex items-center gap-1 font-medium">
-            ✏️ Bấm để thêm thông tin
+          <span className="text-amber-400/90 font-medium">
+            ✏️ Thêm thông tin
           </span>
         ) : (
-          <>
-            <span className="truncate">
-              {yearText ?? <span className="text-slate-500 italic">Chưa có năm sinh</span>}
-            </span>
-            {parentInfo?.hasMultiMarriageParents && parentInfo.parentNames && (
-              <span
-                className="text-[9px] font-medium truncate max-w-20 shrink-0"
-                style={{ color: parentInfo.color }}
-                title={`Con của ${parentInfo.parentNames}`}
-              >
-                của {parentInfo.parentNames}
-              </span>
-            )}
-          </>
+          yearText ?? <span className="text-slate-500 italic">Chưa rõ năm</span>
         )}
       </div>
 

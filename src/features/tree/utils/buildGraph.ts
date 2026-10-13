@@ -148,38 +148,6 @@ export function buildGraph(
     const gen = personGenerations.get(person.id) ?? 1;
     const personMarriages = (marriagesBySpouse.get(person.id) ?? []).sort((a, b) => a.order - b.order);
 
-    const parentMarriage = parentMarriageByChild.get(person.id);
-    let parentInfo:
-      | {
-          parentNames: string;
-          color: string;
-          order: number;
-          orderLabel?: string;
-          hasMultiMarriageParents: boolean;
-        }
-      | undefined;
-
-    if (parentMarriage) {
-      const parentNames = parentMarriage.spouseIds
-        .map((sid) => personById.get(sid))
-        .filter((p): p is Person => Boolean(p && !p.isPlaceholder))
-        .map((p) => (p.lastName ? `${p.lastName} ${p.firstName}` : p.firstName))
-        .join(" & ");
-
-      const parentMarriageColor = getMarriageColor(parentMarriage.order);
-      const hasMultiMarriageParents = parentMarriage.spouseIds.some(
-        (sid) => (marriagesBySpouse.get(sid) ?? []).length > 1
-      );
-
-      parentInfo = {
-        parentNames,
-        color: parentMarriageColor,
-        order: parentMarriage.order,
-        orderLabel: parentMarriage.orderLabel,
-        hasMultiMarriageParents,
-      };
-    }
-
     nodes.push({
       id: person.id,
       type: "person",
@@ -192,7 +160,6 @@ export function buildGraph(
         person,
         generation: gen,
         marriages: personMarriages,
-        parentInfo,
       },
     });
   }
@@ -234,8 +201,22 @@ export function buildGraph(
       const sidB = visibleSpouses[1];
       const countA = (marriagesBySpouse.get(sidA) ?? []).length;
       const countB = (marriagesBySpouse.get(sidB) ?? []).length;
-      const sharedId = countA >= countB ? sidA : sidB;
-      const outerId = countA >= countB ? sidB : sidA;
+      const hasParentA = parentMarriageByChild.has(sidA);
+      const hasParentB = parentMarriageByChild.has(sidB);
+
+      let sharedId: string;
+      let outerId: string;
+
+      if (countA !== countB) {
+        sharedId = countA > countB ? sidA : sidB;
+        outerId = countA > countB ? sidB : sidA;
+      } else if (hasParentA !== hasParentB) {
+        sharedId = hasParentA ? sidA : sidB;
+        outerId = hasParentA ? sidB : sidA;
+      } else {
+        sharedId = sidA < sidB ? sidA : sidB;
+        outerId = sidA < sidB ? sidB : sidA;
+      }
 
       const sharedIdx = personOrderMap.get(sharedId) ?? 0;
       const outerIdx = personOrderMap.get(outerId) ?? 0;

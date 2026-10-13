@@ -201,16 +201,13 @@ function TreeCanvasInner() {
     for (const e of edges) {
       if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
         // e-direct- edges are multi-spouse jump edges across intervening nodes.
-        // Only activate a jump edge if its SPECIFIC marriage union or outer spouse is hovered!
-        // Do NOT activate all jump edges simultaneously when hovering on the shared spouse (e.g. Phan Xuân),
-        // because doing so causes multiple conflicting colors to overlap along the same horizontal path!
+        // Only skip jump edges when hovering directly on the shared spouse (e.g. Phan Xuân),
+        // to prevent multiple conflicting marriage colors from drawing over each other.
+        // When hovering on any other node (a union, an outer spouse, or ANY descendant child in Gen 2+),
+        // the direct edge connects the bloodline back to the shared parent in Gen 1!
         if (e.id.startsWith("e-direct-")) {
           const edgeData = e.data as { marriageId?: string; sharedId?: string; outerId?: string } | undefined;
-          const mId = edgeData?.marriageId;
-          const isThisUnionHovered = Boolean(mId && (hoveredUnionId === `union-${mId}` || hoveredUnionId === mId));
-          const isOuterSpouseHovered = Boolean(edgeData?.outerId && hoveredPersonId === edgeData.outerId);
-
-          if (!isThisUnionHovered && !isOuterSpouseHovered) {
+          if (hoveredPersonId && edgeData?.sharedId && hoveredPersonId === edgeData.sharedId) {
             continue;
           }
         }
@@ -221,7 +218,7 @@ function TreeCanvasInner() {
     return { activeNodeIds: nodeIds, activeEdgeIds: edgeIds };
   }, [hoveredUnionId, hoveredPersonId, parentMarriageByChildId, marriagesBySpouseId, marriages, edges]);
 
-  // Styled display nodes (dim non-active nodes to 25% when hovering; active nodes have zIndex 50 to strictly stay above edges)
+  // Styled display nodes (dim non-active nodes to 25% when hovering; all nodes stay strictly above edges)
   const displayNodes = useMemo(() => {
     return nodes.map((n) => {
       const isDimmed = activeNodeIds ? !activeNodeIds.has(n.id) : false;
@@ -233,7 +230,7 @@ function TreeCanvasInner() {
           opacity: isDimmed ? 0.25 : 1,
           filter: isDimmed ? "grayscale(40%)" : "none",
           transition: "opacity 0.2s ease, filter 0.2s ease",
-          zIndex: isDimmed ? 5 : (isActive ? 50 : 25),
+          zIndex: isDimmed ? 25 : (isActive ? 50 : 30),
         },
       };
     });
@@ -850,6 +847,7 @@ function TreeCanvasInner() {
               bio: editingPerson.bio ?? "",
               spouseLabel: editingPerson.spouseLabel,
               birthOrder: editingPerson.birthOrder,
+              photoURL: editingPerson.photoURL ?? "",
             }}
             onSubmit={handleEditSave}
             onCancel={() => setEditingPersonId(null)}

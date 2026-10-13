@@ -1,8 +1,8 @@
 import { Node, Edge } from "@xyflow/react";
 import { Marriage } from "@/src/types/family";
 
-export const PERSON_NODE_WIDTH = 150;
-export const PERSON_NODE_HEIGHT = 76;
+export const PERSON_NODE_WIDTH = 136;
+export const PERSON_NODE_HEIGHT = 144;
 export const UNION_NODE_SIZE = 28;
 
 export interface LayoutOptions {
@@ -17,7 +17,7 @@ export interface LayoutResult {
 const SIBLING_GAP = 20;
 const CLUSTER_GAP = 56;
 const SPOUSE_UNION_GAP = 18;
-const VERTICAL_TIER_GAP = 110;
+const VERTICAL_TIER_GAP = 96;
 
 function interleaveGeneration(genPeople: Node[], genUnions: Node[]): Node[] {
   const chain: Node[] = [];
