@@ -2,10 +2,12 @@ import { Node, Edge } from "@xyflow/react";
 import { Person, Marriage } from "@/src/types/family";
 import { calculateGenerations } from "./generation";
 import { getMarriageColor } from "./marriageColors";
+import { PERSON_NODE_WIDTH, PERSON_NODE_HEIGHT, UNION_NODE_SIZE } from "./layoutGraph";
 
 export interface BuildGraphOptions {
   collapsedMarriageIds?: Set<string>;
   selectedPersonId?: string | null;
+  isCollapsed?: boolean;
 }
 
 export interface BuildGraphResult {
@@ -14,12 +16,18 @@ export interface BuildGraphResult {
   personGenerations: Map<string, number>;
 }
 
+/**
+ * Builds nodes and edges for the family tree graph.
+ * Unifies both Expanded Mode (hierarchical ELK tree) and Collapsed Mode (generational tiers).
+ */
 export function buildGraph(
   people: Person[],
   marriages: Marriage[],
   options: BuildGraphOptions = {}
 ): BuildGraphResult {
-  const { collapsedMarriageIds = new Set<string>(), selectedPersonId } = options;
+  const { collapsedMarriageIds = new Set<string>() } = options;
+  const isCollapsed =
+    options.isCollapsed ?? (options.collapsedMarriageIds ? options.collapsedMarriageIds.size > 0 : false);
 
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -34,7 +42,7 @@ export function buildGraph(
     personById.set(p.id, p);
   }
 
-  // Sanitize marriages: create virtual placeholder spouses for "Khuyết danh" (single parent) marriages
+  // 1. Sanitize marriages: create virtual placeholder spouses for single parent marriages
   const marriageById = new Map<string, Marriage>();
   const marriagesBySpouse = new Map<string, Marriage[]>();
   const sanitizedMarriages: Marriage[] = [];
@@ -45,9 +53,8 @@ export function buildGraph(
 
     if (validSpouseIds.length === 0 && validChildrenIds.length === 0) continue;
 
-    let effectiveSpouseIds = [...validSpouseIds];
+    const effectiveSpouseIds = [...validSpouseIds];
 
-    // If single spouse, create a placeholder spouse so the marriage has its own horizontal slot
     if (validSpouseIds.length === 1) {
       const singleSpouse = personById.get(validSpouseIds[0]);
       if (singleSpouse) {
@@ -57,7 +64,9 @@ export function buildGraph(
           firstName: singleSpouse.gender === "female" ? "Chồng" : "Vợ",
           lastName: "(Khuyết danh)",
           gender: singleSpouse.gender === "female" ? "male" : "female",
-          spouseLabel: m.orderLabel || (singleSpouse.gender === "female" ? `Chồng thứ ${m.order}` : `Bà thứ ${m.order}`),
+          spouseLabel:
+            m.orderLabel ||
+            (singleSpouse.gender === "female" ? `Chồng thứ ${m.order}` : `Bà thứ ${m.order}`),
           marriageIds: [m.id],
           isPlaceholder: true,
         };
@@ -81,34 +90,49 @@ export function buildGraph(
     }
   }
 
-  // Calculate generations for all people and marriages
-  const { personGenerations, marriageGenerations } = calculateGenerations(allPeople, sanitizedMarriages);
-
-  // Compute hidden descendants for collapsed marriages
-  const hiddenPersonIds = new Set<string>();
-  function hideBranch(mId: string) {
-    const m = marriageById.get(mId);
-    if (!m) return;
+  // 1b. Map child ID to parent marriage for O(1) lineage lookups
+  const parentMarriageByChild = new Map<string, Marriage>();
+  for (const m of sanitizedMarriages) {
     for (const cid of m.childrenIds) {
-      if (!hiddenPersonIds.has(cid)) {
-        hiddenPersonIds.add(cid);
-        const childMarriages = marriagesBySpouse.get(cid) ?? [];
-        for (const cm of childMarriages) {
-          hideBranch(cm.id);
-        }
-      }
+      parentMarriageByChild.set(cid, m);
     }
   }
 
-  for (const cmId of collapsedMarriageIds) {
-    hideBranch(cmId);
+  // 2. Calculate generational levels for all people and marriages
+  const { personGenerations, marriageGenerations } = calculateGenerations(
+    allPeople,
+    sanitizedMarriages
+  );
+
+  // 3. Compute hidden descendants for individually collapsed marriages (Expanded mode)
+  const hiddenPersonIds = new Set<string>();
+  if (!isCollapsed) {
+    function hideBranch(mId: string) {
+      const m = marriageById.get(mId);
+      if (!m) return;
+      for (const cid of m.childrenIds) {
+        if (!hiddenPersonIds.has(cid)) {
+          hiddenPersonIds.add(cid);
+          const childMarriages = marriagesBySpouse.get(cid) ?? [];
+          for (const cm of childMarriages) {
+            hideBranch(cm.id);
+          }
+        }
+      }
+    }
+
+    for (const cmId of collapsedMarriageIds) {
+      hideBranch(cmId);
+    }
   }
 
-  // Visible people (including placeholders)
-  const visiblePeople = allPeople.filter((p) => !hiddenPersonIds.has(p.id));
+  // 4. Visible people
+  const visiblePeople = isCollapsed
+    ? allPeople
+    : allPeople.filter((p) => !hiddenPersonIds.has(p.id));
 
-  // Sort visible people by family lineage so spouses are clustered directly beside their partners
-  const orderedVisiblePeople = sortPeopleForLayout(
+  // 5. Sort visible people by family lineage so spouses are clustered directly beside their partners
+  const orderedVisiblePeople = sortPeopleForLayoutExpanded(
     visiblePeople,
     sanitizedMarriages,
     personGenerations,
@@ -119,57 +143,89 @@ export function buildGraph(
   const personOrderMap = new Map<string, number>();
   orderedVisiblePeople.forEach((p, idx) => personOrderMap.set(p.id, idx));
 
-  // Build person nodes
+  // 6. Build person nodes
   for (const person of orderedVisiblePeople) {
     const gen = personGenerations.get(person.id) ?? 1;
     const personMarriages = (marriagesBySpouse.get(person.id) ?? []).sort((a, b) => a.order - b.order);
+
+    const parentMarriage = parentMarriageByChild.get(person.id);
+    let parentInfo:
+      | {
+          parentNames: string;
+          color: string;
+          order: number;
+          orderLabel?: string;
+          hasMultiMarriageParents: boolean;
+        }
+      | undefined;
+
+    if (parentMarriage) {
+      const parentNames = parentMarriage.spouseIds
+        .map((sid) => personById.get(sid))
+        .filter((p): p is Person => Boolean(p && !p.isPlaceholder))
+        .map((p) => (p.lastName ? `${p.lastName} ${p.firstName}` : p.firstName))
+        .join(" & ");
+
+      const parentMarriageColor = getMarriageColor(parentMarriage.order);
+      const hasMultiMarriageParents = parentMarriage.spouseIds.some(
+        (sid) => (marriagesBySpouse.get(sid) ?? []).length > 1
+      );
+
+      parentInfo = {
+        parentNames,
+        color: parentMarriageColor,
+        order: parentMarriage.order,
+        orderLabel: parentMarriage.orderLabel,
+        hasMultiMarriageParents,
+      };
+    }
 
     nodes.push({
       id: person.id,
       type: "person",
       position: { x: 0, y: 0 },
+      width: PERSON_NODE_WIDTH,
+      height: PERSON_NODE_HEIGHT,
+      initialWidth: PERSON_NODE_WIDTH,
+      initialHeight: PERSON_NODE_HEIGHT,
       data: {
         person,
         generation: gen,
         marriages: personMarriages,
-        isSelected: person.id === selectedPersonId,
+        parentInfo,
       },
     });
   }
 
-  // Sort sanitized marriages by generation, then by the horizontal position of their spouses, then order
+  // 7. Sort sanitized marriages by generation, min spouse horizontal index, then order
   sanitizedMarriages.sort((a, b) => {
     const genA = marriageGenerations.get(a.id) ?? 1;
     const genB = marriageGenerations.get(b.id) ?? 1;
     if (genA !== genB) return genA - genB;
 
-    const minIdxA = Math.min(
-      ...a.spouseIds.map((sid) => personOrderMap.get(sid) ?? 999999)
-    );
-    const minIdxB = Math.min(
-      ...b.spouseIds.map((sid) => personOrderMap.get(sid) ?? 999999)
-    );
+    const minIdxA = Math.min(...a.spouseIds.map((sid) => personOrderMap.get(sid) ?? 999999));
+    const minIdxB = Math.min(...b.spouseIds.map((sid) => personOrderMap.get(sid) ?? 999999));
     if (minIdxA !== minIdxB) return minIdxA - minIdxB;
 
     return (a.order ?? 1) - (b.order ?? 1);
   });
 
-  // Build union nodes & edges
+  // 8. Build union nodes & edges
   for (const marriage of sanitizedMarriages) {
-    // If all spouses or children are hidden, check visibility
-    const visibleSpouses = marriage.spouseIds.filter((sid) => !hiddenPersonIds.has(sid));
-    if (visibleSpouses.length === 0 && marriage.childrenIds.every((cid) => hiddenPersonIds.has(cid))) {
+    const visibleSpouses = marriage.spouseIds.filter((sid) => personOrderMap.has(sid));
+    const visibleChildren = marriage.childrenIds.filter(
+      (cid) => personById.has(cid) && !hiddenPersonIds.has(cid)
+    );
+
+    if (visibleSpouses.length === 0 && visibleChildren.length === 0) {
       continue;
     }
 
     const unionId = `union-${marriage.id}`;
     const mGen = marriageGenerations.get(marriage.id) ?? 1;
-    const isCollapsed = collapsedMarriageIds.has(marriage.id);
-    const visibleChildren = marriage.childrenIds.filter((cid) => !hiddenPersonIds.has(cid));
-
+    const isMarriageCollapsed = isCollapsed || collapsedMarriageIds.has(marriage.id);
     const marriageColor = getMarriageColor(marriage.order);
 
-    // Determine horizontal neighbors (leftNodeId and rightNodeId)
     let leftNodeId: string | null = null;
     let rightNodeId: string | null = null;
 
@@ -196,23 +252,34 @@ export function buildGraph(
       rightNodeId = null;
     }
 
+    const spouseNames = marriage.spouseIds
+      .map((sid) => personById.get(sid))
+      .filter((p): p is Person => Boolean(p && !p.isPlaceholder))
+      .map((p) => (p.lastName ? `${p.lastName} ${p.firstName}` : p.firstName))
+      .join(" × ");
+
     nodes.push({
       id: unionId,
       type: "union",
       position: { x: 0, y: 0 },
+      width: UNION_NODE_SIZE,
+      height: UNION_NODE_SIZE,
+      initialWidth: UNION_NODE_SIZE,
+      initialHeight: UNION_NODE_SIZE,
       data: {
         marriage,
         generation: mGen,
         totalChildrenCount: marriage.childrenIds.length,
         visibleChildrenCount: visibleChildren.length,
-        isCollapsed,
+        isCollapsed: isMarriageCollapsed,
         color: marriageColor,
         leftNodeId,
         rightNodeId,
+        spouseNames,
       },
     });
 
-    // 1. Horizontal straight edges for spouses along the horizontal axis
+    // 8a. Horizontal straight edges for spouses along the horizontal axis
     if (leftNodeId) {
       edges.push({
         id: `e-${leftNodeId}-${marriage.id}`,
@@ -237,18 +304,94 @@ export function buildGraph(
       });
     }
 
-    // 2. Vertical drop edges from union bottom to children (only if not collapsed)
-    if (!isCollapsed) {
-      // Sort children by birthOrder or birthDate
-      const sortedChildren = [...visibleChildren].sort((aId, bId) => {
-        const a = personById.get(aId);
-        const b = personById.get(bId);
-        if (!a || !b) return 0;
-        if (a.birthOrder && b.birthOrder) return a.birthOrder - b.birthOrder;
-        if (a.birthDate && b.birthDate) return a.birthDate.localeCompare(b.birthDate);
-        return (a.createdAt ?? 0) - (b.createdAt ?? 0);
-      });
+    // 8b. Direct edge for multi-spouse marriages where sharedId is not immediately adjacent to union
+    if (visibleSpouses.length >= 2) {
+      const sidA = visibleSpouses[0];
+      const sidB = visibleSpouses[1];
+      const countA = (marriagesBySpouse.get(sidA) ?? []).length;
+      const countB = (marriagesBySpouse.get(sidB) ?? []).length;
+      const hasParentA = parentMarriageByChild.has(sidA);
+      const hasParentB = parentMarriageByChild.has(sidB);
 
+      let sharedId: string;
+      let outerId: string;
+
+      if (countA !== countB) {
+        sharedId = countA > countB ? sidA : sidB;
+        outerId = countA > countB ? sidB : sidA;
+      } else if (hasParentA !== hasParentB) {
+        sharedId = hasParentA ? sidA : sidB;
+        outerId = hasParentA ? sidB : sidA;
+      } else {
+        sharedId = sidA < sidB ? sidA : sidB;
+        outerId = sidA < sidB ? sidB : sidA;
+      }
+
+      const sharedIdx = personOrderMap.get(sharedId) ?? 0;
+      const outerIdx = personOrderMap.get(outerId) ?? 0;
+
+      if (outerIdx > sharedIdx + 1) {
+        edges.push({
+          id: `e-direct-${sharedId}-${marriage.id}`,
+          source: sharedId,
+          sourceHandle: "right",
+          target: unionId,
+          targetHandle: "left",
+          type: "straight",
+          style: { stroke: marriageColor, strokeWidth: 2, opacity: 0 },
+          data: {
+            marriageId: marriage.id,
+            sharedId,
+            outerId,
+          },
+        });
+      } else if (outerIdx < sharedIdx - 1) {
+        edges.push({
+          id: `e-direct-${sharedId}-${marriage.id}`,
+          source: unionId,
+          sourceHandle: "right",
+          target: sharedId,
+          targetHandle: "left",
+          type: "straight",
+          style: { stroke: marriageColor, strokeWidth: 2, opacity: 0 },
+          data: {
+            marriageId: marriage.id,
+            sharedId,
+            outerId,
+          },
+        });
+      }
+    }
+
+    // 8c. Vertical drop edges from union bottom to children
+    const sortedChildren = [...visibleChildren].sort((aId, bId) => {
+      const a = personById.get(aId);
+      const b = personById.get(bId);
+      if (!a || !b) return 0;
+      if (a.birthOrder && b.birthOrder) return a.birthOrder - b.birthOrder;
+      if (a.birthDate && b.birthDate) return a.birthDate.localeCompare(b.birthDate);
+      return (a.createdAt ?? 0) - (b.createdAt ?? 0);
+    });
+
+    if (isCollapsed) {
+      // In collapsed mode: children edges are hidden by default (opacity: 0) and illuminate on hover
+      for (const childId of sortedChildren) {
+        edges.push({
+          id: `e-${marriage.id}-${childId}`,
+          source: unionId,
+          sourceHandle: "bottom",
+          target: childId,
+          targetHandle: "top",
+          type: "smoothstep",
+          style: { stroke: marriageColor, strokeWidth: 2 },
+          data: {
+            isCollapsedChildEdge: true,
+            marriageId: marriage.id,
+          },
+        });
+      }
+    } else if (!isMarriageCollapsed) {
+      // In expanded mode: children edges are visible if this marriage branch is not collapsed
       for (const childId of sortedChildren) {
         edges.push({
           id: `e-${marriage.id}-${childId}`,
@@ -267,10 +410,10 @@ export function buildGraph(
 }
 
 /**
- * Sorts people by genealogical hierarchy so that spouses always sit
- * immediately adjacent to their partners, and siblings follow their parents' marriage order.
+ * Clusters spouses directly adjacent to each other on the horizontal axis
+ * based on bloodline hierarchy.
  */
-function sortPeopleForLayout(
+function sortPeopleForLayoutExpanded(
   people: Person[],
   marriages: Marriage[],
   personGenerations: Map<string, number>,
@@ -282,7 +425,6 @@ function sortPeopleForLayout(
     personById.set(p.id, p);
   }
 
-  // Group visible people by generation
   const peopleByGen = new Map<number, Person[]>();
   for (const p of people) {
     const gen = personGenerations.get(p.id) ?? 1;
@@ -314,7 +456,6 @@ function sortPeopleForLayout(
       for (const m of pMarriages) {
         for (const sid of m.spouseIds) {
           if (sid !== personId && !visited.has(sid)) {
-            // Only group spouses in the exact same generation
             if ((personGenerations.get(sid) ?? gen) === gen) {
               visited.add(sid);
               if (m.direction === "left") {
@@ -345,7 +486,6 @@ function sortPeopleForLayout(
       }
     }
 
-    // 1. Follow bloodline children from previous generation's ordered parent marriages
     const prevOrdered = orderedPeopleByGen.get(gen - 1) ?? [];
     if (prevOrdered.length > 0) {
       const prevOrderMap = new Map<string, number>();
@@ -353,7 +493,6 @@ function sortPeopleForLayout(
       const seenMarriages = new Set<string>();
 
       for (const parent of prevOrdered) {
-        // Sort marriages by physical left-to-right order of the other spouse in prevOrdered
         const pMarriages = (marriagesBySpouse.get(parent.id) ?? []).slice().sort((a, b) => {
           const spouseA = a.spouseIds.find((id) => id !== parent.id);
           const spouseB = b.spouseIds.find((id) => id !== parent.id);
@@ -385,7 +524,6 @@ function sortPeopleForLayout(
       }
     }
 
-    // 2. Add any remaining people in this generation (e.g. roots or founders)
     const remaining = currentGenPeople.filter((p) => !visited.has(p.id));
     remaining.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
     for (const rem of remaining) {

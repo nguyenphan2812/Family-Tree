@@ -15,13 +15,24 @@ export function PersonNode({ id, data }: NodeProps) {
     onAddChildToPerson,
     onSelectPerson,
     onRequireAuth,
+    setHoveredPersonId,
+    selectedPersonId,
   } = useTreeContext();
 
   const [hovered, setHovered] = useState(false);
   const person = data.person as Person;
   const generation = (data.generation as number) ?? 1;
-  const isSelected = Boolean(data.isSelected);
+  const isSelected = selectedPersonId === id || Boolean(data.isSelected);
   const isPlaceholder = Boolean(person.isPlaceholder);
+  const parentInfo = data.parentInfo as
+    | {
+        parentNames: string;
+        color: string;
+        order: number;
+        orderLabel?: string;
+        hasMultiMarriageParents: boolean;
+      }
+    | undefined;
 
   const isMale = person.gender === "male";
   const isFemale = person.gender === "female";
@@ -45,8 +56,10 @@ export function PersonNode({ id, data }: NodeProps) {
     : "bg-slate-900/60";
 
   // Format short birth/death year
-  const birthYear = person.birthDate ? new Date(person.birthDate).getFullYear() : null;
-  const deathYear = person.deathDate ? new Date(person.deathDate).getFullYear() : null;
+  const rawBirth = person.birthDate ? new Date(person.birthDate).getFullYear() : null;
+  const rawDeath = person.deathDate ? new Date(person.deathDate).getFullYear() : null;
+  const birthYear = rawBirth && !isNaN(rawBirth) ? rawBirth : null;
+  const deathYear = rawDeath && !isNaN(rawDeath) ? rawDeath : null;
   const yearText = birthYear || deathYear ? `${birthYear ?? "?"} - ${deathYear ?? ""}` : null;
 
   // Show action buttons ONLY when hovered and NOT placeholder
@@ -62,8 +75,14 @@ export function PersonNode({ id, data }: NodeProps) {
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => {
+        setHovered(true);
+        setHoveredPersonId(id);
+      }}
+      onMouseLeave={() => {
+        setHovered(false);
+        setHoveredPersonId(null);
+      }}
       onClick={() => {
         onSelectPerson(id);
         if (isEditor) onEditPerson(id);
@@ -72,6 +91,8 @@ export function PersonNode({ id, data }: NodeProps) {
       style={{
         width: PERSON_NODE_WIDTH,
         height: PERSON_NODE_HEIGHT,
+        borderLeftColor: parentInfo?.hasMultiMarriageParents ? parentInfo.color : undefined,
+        borderLeftWidth: parentInfo?.hasMultiMarriageParents ? 3 : undefined,
       }}
     >
       {/* React Flow Handles */}
@@ -79,6 +100,12 @@ export function PersonNode({ id, data }: NodeProps) {
         type="target"
         position={Position.Top}
         id="top"
+        style={{ opacity: 0, width: 8, height: 8 }}
+      />
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="top-source"
         style={{ opacity: 0, width: 8, height: 8 }}
       />
       <Handle
@@ -119,12 +146,36 @@ export function PersonNode({ id, data }: NodeProps) {
           Đời {generation}
         </span>
         {person.spouseLabel ? (
-          <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-medium truncate max-w-[70px]">
+          <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-medium truncate max-w-17.5">
             {person.spouseLabel}
           </span>
         ) : person.birthOrder ? (
-          <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 text-[9px]">
-            Con thứ {person.birthOrder}
+          <span
+            className="px-1.5 py-0.2 rounded text-[9px] flex items-center gap-1 font-medium max-w-22.5"
+            style={{
+              backgroundColor: parentInfo?.hasMultiMarriageParents
+                ? `${parentInfo.color}25`
+                : "#1e293b",
+              color: parentInfo?.hasMultiMarriageParents
+                ? parentInfo.color
+                : "#cbd5e1",
+              border: parentInfo?.hasMultiMarriageParents
+                ? `1px solid ${parentInfo.color}50`
+                : undefined,
+            }}
+            title={
+              parentInfo?.parentNames
+                ? `Con thứ ${person.birthOrder} · Của ${parentInfo.parentNames}`
+                : `Con thứ ${person.birthOrder}`
+            }
+          >
+            {parentInfo?.hasMultiMarriageParents && (
+              <span
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: parentInfo.color }}
+              />
+            )}
+            <span className="truncate">Con thứ {person.birthOrder}</span>
           </span>
         ) : isPlaceholder ? (
           <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-medium">
@@ -137,18 +188,35 @@ export function PersonNode({ id, data }: NodeProps) {
       <div className="font-medium text-xs text-slate-100 truncate flex items-center gap-1">
         <span>{isPlaceholder ? "👤" : isMale ? "👨" : isFemale ? "👩" : "👤"}</span>
         <span className={`truncate ${isPlaceholder ? "text-amber-200/90 italic" : ""}`}>
-          {person.firstName} {person.lastName}
+          {isPlaceholder
+            ? `${person.firstName} ${person.lastName}`
+            : person.lastName
+            ? `${person.lastName} ${person.firstName}`
+            : person.firstName}
         </span>
       </div>
 
-      {/* Bottom Dates */}
-      <div className="text-[10px] text-slate-400 truncate">
+      {/* Bottom Dates & Parentage */}
+      <div className="text-[10px] text-slate-400 truncate flex items-center justify-between gap-1">
         {isPlaceholder ? (
           <span className="text-amber-400/90 text-[10px] flex items-center gap-1 font-medium">
             ✏️ Bấm để thêm thông tin
           </span>
         ) : (
-          yearText ?? <span className="text-slate-500 italic">Chưa có năm sinh</span>
+          <>
+            <span className="truncate">
+              {yearText ?? <span className="text-slate-500 italic">Chưa có năm sinh</span>}
+            </span>
+            {parentInfo?.hasMultiMarriageParents && parentInfo.parentNames && (
+              <span
+                className="text-[9px] font-medium truncate max-w-20 shrink-0"
+                style={{ color: parentInfo.color }}
+                title={`Con của ${parentInfo.parentNames}`}
+              >
+                của {parentInfo.parentNames}
+              </span>
+            )}
+          </>
         )}
       </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { addDoc, deleteDoc, updateDoc } from "firebase/firestore";
+import { addDoc, deleteDoc, updateDoc, deleteField } from "firebase/firestore";
 import { peopleCollection, personDoc } from "@/src/lib/queries";
 import { Person } from "@/src/types/family";
 import { useAuth } from "@/src/features/auth/hooks/useAuth";
@@ -23,10 +23,20 @@ export function usePersonMutations() {
   }
 
   async function updatePerson(personId: string, data: Partial<Person>) {
-    await updateDoc(personDoc(personId), {
-      ...data,
+    const cleanData: Record<string, unknown> = {
       updatedAt: Date.now(),
-    });
+    };
+
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "id") continue;
+      if (value === undefined) {
+        cleanData[key] = deleteField();
+      } else {
+        cleanData[key] = value;
+      }
+    }
+
+    await updateDoc(personDoc(personId), cleanData);
   }
 
   async function deletePerson(personId: string) {

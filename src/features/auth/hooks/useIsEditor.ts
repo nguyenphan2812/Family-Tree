@@ -19,12 +19,19 @@ export function useIsEditor() {
         return;
       }
 
-      const familyRef = doc(db, "families", familyId);
-      const familySnap = await getDoc(familyRef);
-      const editorEmails: string[] = familySnap.data()?.editorEmails ?? [];
+      try {
+        const familyRef = doc(db, "families", familyId);
+        const familySnap = await getDoc(familyRef);
+        const editorEmails: string[] = familySnap.data()?.editorEmails ?? [];
+        const userEmail = (user.email ?? "").toLowerCase().trim();
 
-      setIsEditor(editorEmails.includes(user.email ?? ""));
-      setChecking(false);
+        setIsEditor(editorEmails.some((e) => e.toLowerCase().trim() === userEmail));
+      } catch (err) {
+        console.error("Failed to verify editor status:", err);
+        setIsEditor(false);
+      } finally {
+        setChecking(false);
+      }
     }
 
     if (!authLoading) {

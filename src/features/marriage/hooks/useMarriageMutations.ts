@@ -1,7 +1,8 @@
 "use client";
 
-import { addDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { doc, writeBatch, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { marriagesCollection, marriageDoc, personDoc } from "@/src/lib/queries";
+import { db } from "@/src/lib/firebase";
 import { MarriageStatus } from "@/src/types/family";
 
 export function useMarriageMutations() {
@@ -26,8 +27,11 @@ export function useMarriageMutations() {
       direction = "right",
     } = params;
 
-    const docRef = await addDoc(marriagesCollection(), {
-      id: "",
+    const marriageRef = doc(marriagesCollection());
+    const batch = writeBatch(db);
+
+    batch.set(marriageRef, {
+      id: marriageRef.id,
       spouseIds,
       order,
       orderLabel,
@@ -38,23 +42,24 @@ export function useMarriageMutations() {
       direction,
     });
 
-    await Promise.all(
-      spouseIds.map((personId) =>
-        updateDoc(personDoc(personId), { marriageIds: arrayUnion(docRef.id) })
-      )
-    );
+    for (const personId of spouseIds) {
+      batch.update(personDoc(personId), { marriageIds: arrayUnion(marriageRef.id) });
+    }
 
-    return docRef.id;
+    await batch.commit();
+    return marriageRef.id;
   }
 
   async function addSpouseToMarriage(marriageId: string, spouseId: string) {
-    await updateDoc(marriageDoc(marriageId), {
+    const batch = writeBatch(db);
+    batch.update(marriageDoc(marriageId), {
       spouseIds: arrayUnion(spouseId),
       isPlaceholder: false,
     });
-    await updateDoc(personDoc(spouseId), {
+    batch.update(personDoc(spouseId), {
       marriageIds: arrayUnion(marriageId),
     });
+    await batch.commit();
   }
 
   async function addChildToMarriage(marriageId: string, childId: string) {
@@ -64,12 +69,12 @@ export function useMarriageMutations() {
   }
 
   async function deleteMarriage(marriageId: string, spouseIds: string[]) {
-    await Promise.all(
-      spouseIds.map((personId) =>
-        updateDoc(personDoc(personId), { marriageIds: arrayRemove(marriageId) })
-      )
-    );
-    await deleteDoc(marriageDoc(marriageId));
+    const batch = writeBatch(db);
+    for (const personId of spouseIds) {
+      batch.update(personDoc(personId), { marriageIds: arrayRemove(marriageId) });
+    }
+    batch.delete(marriageDoc(marriageId));
+    await batch.commit();
   }
 
   // Removes a person from every marriage they're part of (as spouse or child),
@@ -79,19 +84,23 @@ export function useMarriageMutations() {
       (m) => m.spouseIds.includes(personId) || m.childrenIds.includes(personId)
     );
 
+    if (affected.length === 0) return;
+
+    const batch = writeBatch(db);
     for (const marriage of affected) {
       const newSpouseIds = marriage.spouseIds.filter((id) => id !== personId);
       const newChildrenIds = marriage.childrenIds.filter((id) => id !== personId);
 
       if (newSpouseIds.length === 0 && newChildrenIds.length === 0) {
-        await deleteDoc(marriageDoc(marriage.id));
+        batch.delete(marriageDoc(marriage.id));
       } else {
-        await updateDoc(marriageDoc(marriage.id), {
+        batch.update(marriageDoc(marriage.id), {
           spouseIds: newSpouseIds,
           childrenIds: newChildrenIds,
         });
       }
     }
+    await batch.commit();
   }
 
   return {

@@ -3,8 +3,8 @@ import "./globals.css";
 import "@xyflow/react/dist/style.css";
 
 export const metadata: Metadata = {
-  title: "Gia Phả Dòng Họ - Family Tree",
-  description: "Cây gia phả trực quan đa thế hệ",
+  title: "Family Tree",
+  description: "Family Tree",
 };
 
 export default function RootLayout({

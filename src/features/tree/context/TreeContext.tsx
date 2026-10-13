@@ -14,6 +14,12 @@ interface TreeContextValue {
   onSelectPerson: (personId: string) => void;
   onAddTree: (data: PersonFormData) => void;
   onRequireAuth: () => void;
+  hoveredUnionId: string | null;
+  hoveredPersonId: string | null;
+  setHoveredUnionId: (id: string | null) => void;
+  setHoveredPersonId: (id: string | null) => void;
+  activeNodeIds: Set<string> | null;
+  selectedPersonId: string | null;
 }
 
 export const TreeContext = createContext<TreeContextValue | null>(null);

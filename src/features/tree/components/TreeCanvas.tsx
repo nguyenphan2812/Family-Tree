@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Node,
   Edge,
@@ -28,14 +28,17 @@ import { SelectSpouseForChildModal } from "./SelectSpouseForChildModal";
 import { TreeSearchBar } from "./TreeSearchBar";
 import { layoutGraph, PERSON_NODE_WIDTH, PERSON_NODE_HEIGHT } from "../utils/layoutGraph";
 import { Person, Marriage } from "@/src/types/family";
-import { deleteDoc } from "firebase/firestore";
-import { marriageDoc } from "@/src/lib/queries";
+import { writeBatch } from "firebase/firestore";
+import { marriageDoc, personDoc } from "@/src/lib/queries";
+import { db } from "@/src/lib/firebase";
+import { FamilyEdge } from "./FamilyEdge";
 
 const nodeTypes = { person: PersonNode, union: UnionNode };
+const edgeTypes = { smoothstep: FamilyEdge, family: FamilyEdge };
 
 function TreeCanvasInner() {
-  const { people, loading: peopleLoading } = usePeople();
-  const { marriages } = useMarriages();
+  const { people, loading: peopleLoading, error: peopleError } = usePeople();
+  const { marriages, error: marriagesError } = useMarriages();
   const { addPerson, updatePerson, deletePerson } = usePersonMutations();
   const {
     createMarriage,
@@ -46,12 +49,15 @@ function TreeCanvasInner() {
   const { isEditor, user } = useIsEditor();
   const { signIn, logOut } = useAuth();
   const { fitView, setCenter } = useReactFlow();
+  const initialFitDoneRef = useRef(false);
 
   // State
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [collapsedMarriageIds, setCollapsedMarriageIds] = useState<Set<string>>(new Set());
+  const [hoveredUnionId, setHoveredUnionId] = useState<string | null>(null);
+  const [hoveredPersonId, setHoveredPersonId] = useState<string | null>(null);
 
   // Modal states
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
@@ -66,37 +72,241 @@ function TreeCanvasInner() {
 
   // Layout calculation
   const { graphNodes, graphEdges, personGenerations } = useMemo(() => {
+    const isCollapsed = collapsedMarriageIds.size > 0;
     const { nodes: rawNodes, edges: rawEdges, personGenerations } = buildGraph(
       people,
       marriages,
       {
         collapsedMarriageIds,
-        selectedPersonId,
+        isCollapsed,
       }
     );
     return { graphNodes: rawNodes, graphEdges: rawEdges, personGenerations };
-  }, [people, marriages, collapsedMarriageIds, selectedPersonId]);
+  }, [people, marriages, collapsedMarriageIds]);
 
   useEffect(() => {
     let isCancelled = false;
-    layoutGraph(graphNodes, graphEdges).then((positionedNodes) => {
-      if (!isCancelled) {
-        setNodes(positionedNodes);
-        setEdges(graphEdges);
+    const isCollapsed = collapsedMarriageIds.size > 0;
+    layoutGraph(graphNodes, graphEdges, { isCollapsed }).then(
+      ({ nodes: positionedNodes, edges: positionedEdges }) => {
+        if (!isCancelled) {
+          setNodes(positionedNodes);
+          setEdges(positionedEdges);
+        }
       }
-    });
+    );
     return () => {
       isCancelled = true;
     };
-  }, [graphNodes, graphEdges]);
+  }, [graphNodes, graphEdges, collapsedMarriageIds]);
+
+  // Lookup maps for fast ancestor & descendant traversal (memoized per marriages)
+  const { parentMarriageByChildId, marriagesBySpouseId } = useMemo(() => {
+    const parentMap = new Map<string, Marriage>();
+    const spouseMap = new Map<string, Marriage[]>();
+    for (const m of marriages) {
+      for (const cid of m.childrenIds) {
+        parentMap.set(cid, m);
+      }
+      for (const sid of m.spouseIds) {
+        if (!spouseMap.has(sid)) {
+          spouseMap.set(sid, []);
+        }
+        spouseMap.get(sid)!.push(m);
+      }
+    }
+    return { parentMarriageByChildId: parentMap, marriagesBySpouseId: spouseMap };
+  }, [marriages]);
+
+  // Compute active nodes & edges when hovering on a Union or Person (full recursive bloodline traversal)
+  const { activeNodeIds, activeEdgeIds } = useMemo(() => {
+    if (!hoveredUnionId && !hoveredPersonId) {
+      return { activeNodeIds: null, activeEdgeIds: null };
+    }
+    const nodeIds = new Set<string>();
+    const edgeIds = new Set<string>();
+
+    // Recursive ancestor traversal (parents, grandparents, great-grandparents, ...)
+    const visitedAncestors = new Set<string>();
+    const addAncestors = (personId: string) => {
+      if (visitedAncestors.has(personId)) return;
+      visitedAncestors.add(personId);
+
+      const parentM = parentMarriageByChildId.get(personId);
+      if (!parentM) return;
+      const unionId = `union-${parentM.id}`;
+      nodeIds.add(unionId);
+      for (const sid of parentM.spouseIds) {
+        nodeIds.add(sid);
+        addAncestors(sid);
+      }
+    };
+
+    // Recursive descendant traversal (children, grandchildren, great-grandchildren, ...)
+    const visitedDescendants = new Set<string>();
+    const addDescendants = (personId: string) => {
+      if (visitedDescendants.has(personId)) return;
+      visitedDescendants.add(personId);
+
+      const ownMarriages = marriagesBySpouseId.get(personId) ?? [];
+      for (const m of ownMarriages) {
+        const unionId = `union-${m.id}`;
+        nodeIds.add(unionId);
+        for (const sid of m.spouseIds) {
+          nodeIds.add(sid);
+        }
+        for (const cid of m.childrenIds) {
+          nodeIds.add(cid);
+          addDescendants(cid);
+        }
+      }
+    };
+
+    if (hoveredUnionId) {
+      const mId = hoveredUnionId.startsWith("union-")
+        ? hoveredUnionId.replace("union-", "")
+        : hoveredUnionId;
+      const marriage = marriages.find((m) => m.id === mId);
+      if (marriage) {
+        nodeIds.add(`union-${marriage.id}`);
+        for (const sid of marriage.spouseIds) {
+          nodeIds.add(sid);
+          addAncestors(sid);
+        }
+        for (const cid of marriage.childrenIds) {
+          nodeIds.add(cid);
+          addDescendants(cid);
+        }
+      }
+    } else if (hoveredPersonId) {
+      nodeIds.add(hoveredPersonId);
+      // Include direct siblings for immediate family context
+      const parentM = parentMarriageByChildId.get(hoveredPersonId);
+      if (parentM) {
+        nodeIds.add(`union-${parentM.id}`);
+        for (const sid of parentM.spouseIds) {
+          nodeIds.add(sid);
+        }
+        for (const cid of parentM.childrenIds) {
+          nodeIds.add(cid);
+        }
+      }
+      // Trace all ancestors up to the roots
+      addAncestors(hoveredPersonId);
+      // Trace all descendants down to the leaves
+      addDescendants(hoveredPersonId);
+    }
+
+    // Collect all edges connecting the active bloodline nodes
+    for (const e of edges) {
+      if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
+        // e-direct- edges are multi-spouse jump edges across intervening nodes.
+        // Only activate a jump edge if its SPECIFIC marriage union or outer spouse is hovered!
+        // Do NOT activate all jump edges simultaneously when hovering on the shared spouse (e.g. Phan Xuân),
+        // because doing so causes multiple conflicting colors to overlap along the same horizontal path!
+        if (e.id.startsWith("e-direct-")) {
+          const edgeData = e.data as { marriageId?: string; sharedId?: string; outerId?: string } | undefined;
+          const mId = edgeData?.marriageId;
+          const isThisUnionHovered = Boolean(mId && (hoveredUnionId === `union-${mId}` || hoveredUnionId === mId));
+          const isOuterSpouseHovered = Boolean(edgeData?.outerId && hoveredPersonId === edgeData.outerId);
+
+          if (!isThisUnionHovered && !isOuterSpouseHovered) {
+            continue;
+          }
+        }
+        edgeIds.add(e.id);
+      }
+    }
+
+    return { activeNodeIds: nodeIds, activeEdgeIds: edgeIds };
+  }, [hoveredUnionId, hoveredPersonId, parentMarriageByChildId, marriagesBySpouseId, marriages, edges]);
+
+  // Styled display nodes (dim non-active nodes to 25% when hovering; active nodes have zIndex 50 to strictly stay above edges)
+  const displayNodes = useMemo(() => {
+    return nodes.map((n) => {
+      const isDimmed = activeNodeIds ? !activeNodeIds.has(n.id) : false;
+      const isActive = activeNodeIds ? activeNodeIds.has(n.id) : false;
+      return {
+        ...n,
+        style: {
+          ...n.style,
+          opacity: isDimmed ? 0.25 : 1,
+          filter: isDimmed ? "grayscale(40%)" : "none",
+          transition: "opacity 0.2s ease, filter 0.2s ease",
+          zIndex: isDimmed ? 5 : (isActive ? 50 : 25),
+        },
+      };
+    });
+  }, [nodes, activeNodeIds]);
+
+  // Styled display edges (edges stay at zIndex 2/0 behind nodes; highlighted edges get zIndex 20)
+  const displayEdges = useMemo(() => {
+    return edges.map((e) => {
+      const isDirect = e.id.startsWith("e-direct-");
+      const isHighlighted = activeEdgeIds ? activeEdgeIds.has(e.id) : false;
+      const isCollapsedChild = Boolean(e.data?.isCollapsedChildEdge);
+
+      if (isDirect) {
+        return {
+          ...e,
+          zIndex: isHighlighted ? 20 : 0,
+          style: {
+            ...e.style,
+            opacity: isHighlighted ? 1 : 0,
+            strokeWidth: isHighlighted ? 3 : 0,
+            pointerEvents: isHighlighted ? ("auto" as const) : ("none" as const),
+            transition: "opacity 0.2s ease, stroke-width 0.2s ease",
+            zIndex: isHighlighted ? 20 : 0,
+          },
+        };
+      }
+
+      // If this child edge belongs to a collapsed marriage:
+      // In collapsed mode: completely hidden (opacity: 0, strokeWidth: 0) unless hovered/highlighted!
+      if (isCollapsedChild) {
+        return {
+          ...e,
+          zIndex: isHighlighted ? 20 : 0,
+          style: {
+            ...e.style,
+            opacity: isHighlighted ? 1 : 0,
+            strokeWidth: isHighlighted ? 2.5 : 0,
+            pointerEvents: isHighlighted ? ("auto" as const) : ("none" as const),
+            transition: "opacity 0.2s ease, stroke-width 0.2s ease",
+            zIndex: isHighlighted ? 20 : 0,
+          },
+        };
+      }
+
+      if (!activeEdgeIds) {
+        return {
+          ...e,
+          zIndex: 2,
+        };
+      }
+
+      return {
+        ...e,
+        zIndex: isHighlighted ? 20 : 1,
+        style: {
+          ...e.style,
+          opacity: isHighlighted ? 1 : 0.12,
+          strokeWidth: isHighlighted ? 3 : 1.5,
+          transition: "opacity 0.2s ease, stroke-width 0.2s ease",
+          zIndex: isHighlighted ? 20 : 1,
+        },
+      };
+    });
+  }, [edges, activeEdgeIds]);
 
   // Initial fit view on first load
   useEffect(() => {
-    if (nodes.length > 0 && !selectedPersonId) {
+    if (nodes.length > 0 && !initialFitDoneRef.current && !selectedPersonId) {
+      initialFitDoneRef.current = true;
       const timeout = setTimeout(() => fitView({ padding: 0.35, duration: 400 }), 150);
       return () => clearTimeout(timeout);
     }
-  }, [nodes.length === 0, fitView]);
+  }, [nodes.length, selectedPersonId, fitView]);
 
   // Focus & glide to selected person
   const handleSelectPerson = useCallback(
@@ -308,16 +518,19 @@ function TreeCanvasInner() {
     [addPerson]
   );
 
-  // Reset / Clear all data for re-testing
+  // Reset / Clear all data for re-testing (Editor only, atomic batch)
   const handleResetAllData = useCallback(async () => {
+    if (!isEditor) return;
     setIsResetting(true);
     try {
+      const batch = writeBatch(db);
       for (const p of people) {
-        await deletePerson(p.id);
+        batch.delete(personDoc(p.id));
       }
       for (const m of marriages) {
-        await deleteDoc(marriageDoc(m.id));
+        batch.delete(marriageDoc(m.id));
       }
+      await batch.commit();
       setSelectedPersonId(null);
       setShowConfirmReset(false);
     } catch (err) {
@@ -325,7 +538,7 @@ function TreeCanvasInner() {
     } finally {
       setIsResetting(false);
     }
-  }, [people, marriages, deletePerson]);
+  }, [isEditor, people, marriages]);
 
   const childPersonForAddParent = people.find((p) => p.id === addingParentForChildId);
   const parentForAddSpouse = people.find((p) => p.id === addingSpouseForPersonId);
@@ -374,6 +587,26 @@ function TreeCanvasInner() {
     }
     return max;
   }, [personGenerations]);
+
+  if (peopleError || marriagesError) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-300 p-4">
+        <div className="flex flex-col items-center gap-3 text-center max-w-sm bg-slate-900 border border-red-800/80 p-6 rounded-2xl shadow-xl">
+          <span className="text-3xl">⚠️</span>
+          <h2 className="text-base font-semibold text-red-300">Không thể tải dữ liệu gia phả</h2>
+          <p className="text-xs text-slate-400">
+            {peopleError?.message || marriagesError?.message || "Đã xảy ra sự cố khi kết nối dữ liệu. Vui lòng kiểm tra kết nối mạng."}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 mt-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 cursor-pointer"
+          >
+            Tải lại trang
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (peopleLoading) {
     return (
@@ -472,6 +705,12 @@ function TreeCanvasInner() {
         onSelectPerson: handleSelectPerson,
         onAddTree: handleAddTree,
         onRequireAuth: signIn,
+        hoveredUnionId,
+        hoveredPersonId,
+        setHoveredUnionId,
+        setHoveredPersonId,
+        activeNodeIds,
+        selectedPersonId,
       }}
     >
       <div className="relative w-full h-screen bg-slate-950">
@@ -508,21 +747,19 @@ function TreeCanvasInner() {
               </button>
             )}
 
-            <span className="text-slate-600">•</span>
-            {/* Always visible Reset Button */}
-            <button
-              onClick={() => {
-                if (!user) {
-                  signIn();
-                } else {
-                  setShowConfirmReset(true);
-                }
-              }}
-              className="px-2.5 py-1 rounded bg-red-950/90 hover:bg-red-900 border border-red-700/80 text-red-300 hover:text-red-100 text-[11px] font-medium flex items-center gap-1 cursor-pointer transition shadow"
-              title="Xóa toàn bộ dữ liệu để test lại từ đầu"
-            >
-              🗑️ Xóa dữ liệu (Reset)
-            </button>
+            {/* Reset Button (Editors only) */}
+            {isEditor && (
+              <>
+                <span className="text-slate-600">•</span>
+                <button
+                  onClick={() => setShowConfirmReset(true)}
+                  className="px-2.5 py-1 rounded bg-red-950/90 hover:bg-red-900 border border-red-700/80 text-red-300 hover:text-red-100 text-[11px] font-medium flex items-center gap-1 cursor-pointer transition shadow"
+                  title="Xóa toàn bộ dữ liệu để test lại từ đầu (Chỉ Editor)"
+                >
+                  🗑️ Xóa dữ liệu (Reset)
+                </button>
+              </>
+            )}
 
             <span className="text-slate-600">•</span>
             {/* User status & Login */}
@@ -550,13 +787,43 @@ function TreeCanvasInner() {
         </div>
 
         {/* Canvas */}
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} minZoom={0.1} maxZoom={2}>
+        <ReactFlow
+          nodes={displayNodes}
+          edges={displayEdges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          minZoom={0.1}
+          maxZoom={2}
+        >
           <Background color="#334155" gap={24} size={1} />
           <Controls className="bg-slate-900! border-slate-700! text-slate-200!" />
           <MiniMap
-            nodeColor={(n) => (n.type === "union" ? "#eab308" : "#3b82f6")}
-            maskColor="rgba(15, 23, 42, 0.7)"
-            className="bg-slate-900! border-slate-700!"
+            pannable
+            zoomable
+            position="bottom-right"
+            bgColor="#090d16"
+            maskColor="rgba(2, 6, 23, 0.75)"
+            maskStrokeColor="#38bdf8"
+            maskStrokeWidth={2}
+            nodeBorderRadius={3}
+            nodeStrokeColor="#1e293b"
+            nodeStrokeWidth={1}
+            nodeColor={(n) => {
+              if (n.type === "union") {
+                return (n.data as { color?: string })?.color || "#eab308";
+              }
+              const p = (n.data as { person?: Person })?.person;
+              if (p?.isPlaceholder) return "#f59e0b";
+              if (p?.gender === "female") return "#fb7185";
+              return "#38bdf8";
+            }}
+            onNodeClick={(_event, node) => {
+              if (node.type === "person") {
+                handleSelectPerson(node.id);
+              }
+            }}
+            className="rounded-xl overflow-hidden border border-slate-700 shadow-2xl bg-slate-900"
+            style={{ width: 220, height: 160 }}
           />
         </ReactFlow>
 
@@ -609,7 +876,6 @@ function TreeCanvasInner() {
               .filter((m) => m.spouseIds.includes(parentForAddSpouse.id))
               .sort((a, b) => a.order - b.order)}
             people={people}
-            direction={addingSpouseDirection}
             onSubmit={handleSaveSpouse}
             onCancel={() => setAddingSpouseForPersonId(null)}
           />

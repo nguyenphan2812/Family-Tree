@@ -12,12 +12,18 @@ interface UnionNodeData {
   visibleChildrenCount: number;
   isCollapsed: boolean;
   color?: string;
+  spouseNames?: string;
 }
 
-export function UnionNode({ id: _id, data }: NodeProps) {
+export function UnionNode({ data }: NodeProps) {
   const unionData = data as unknown as UnionNodeData;
-  const { marriage, totalChildrenCount, isCollapsed, color } = unionData;
-  const { isEditor, onAddChildToMarriage, onToggleCollapseMarriage } = useTreeContext();
+  const { marriage, totalChildrenCount, isCollapsed, color, spouseNames } = unionData;
+  const {
+    isEditor,
+    onAddChildToMarriage,
+    onToggleCollapseMarriage,
+    setHoveredUnionId,
+  } = useTreeContext();
   const [hovered, setHovered] = useState(false);
 
   const hasChildren = totalChildrenCount > 0;
@@ -25,16 +31,38 @@ export function UnionNode({ id: _id, data }: NodeProps) {
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={() => {
+        setHovered(true);
+        setHoveredUnionId(marriage.id);
+      }}
+      onMouseLeave={() => {
+        setHovered(false);
+        setHoveredUnionId(null);
+      }}
       className="relative flex items-center justify-center"
       style={{ width: 28, height: 28 }}
     >
+      {/* Tooltip Chip on Hover */}
+      {hovered && (
+        <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap px-2.5 py-0.5 rounded-full bg-slate-900/95 text-[10px] text-slate-100 border border-slate-700 shadow-xl pointer-events-none z-50 backdrop-blur-md flex items-center gap-1.5 font-medium animate-in fade-in zoom-in-95 duration-150">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: accentColor }} />
+          <span>{spouseNames || marriage.orderLabel || "Hôn nhân"}</span>
+          <span className="text-slate-500">·</span>
+          <span className="text-amber-300 font-semibold">{totalChildrenCount} con</span>
+        </div>
+      )}
+
       {/* Handles */}
       <Handle
         type="target"
         position={Position.Top}
         id="top"
+        style={{ opacity: 0, width: 4, height: 4 }}
+      />
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="top-source"
         style={{ opacity: 0, width: 4, height: 4 }}
       />
       <Handle
@@ -83,8 +111,8 @@ export function UnionNode({ id: _id, data }: NodeProps) {
         }}
         title={
           hasChildren
-            ? `${totalChildrenCount} người con ${marriage.orderLabel ? `(${marriage.orderLabel})` : ""} - Click để ${isCollapsed ? "mở rộng" : "thu gọn"}`
-            : `Hôn nhân ${marriage.orderLabel ? `(${marriage.orderLabel})` : ""}`
+            ? `${spouseNames || "Hôn nhân"} · ${totalChildrenCount} người con ${marriage.orderLabel ? `(${marriage.orderLabel})` : ""} - Click để ${isCollapsed ? "mở rộng" : "thu gọn"}`
+            : `${spouseNames || "Hôn nhân"} ${marriage.orderLabel ? `(${marriage.orderLabel})` : ""}`
         }
         onClick={() => {
           if (hasChildren) {

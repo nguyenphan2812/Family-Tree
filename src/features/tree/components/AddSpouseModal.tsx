@@ -8,7 +8,6 @@ interface Props {
   person: Person;
   existingMarriages: Marriage[];
   people: Person[];
-  direction?: "left" | "right";
   onSubmit: (data: {
     spouseData: PersonFormData;
     order: number;
@@ -21,7 +20,6 @@ export function AddSpouseModal({
   person,
   existingMarriages,
   people,
-  direction = "right",
   onSubmit,
   onCancel,
 }: Props) {
@@ -189,6 +187,16 @@ export function AddSpouseModal({
               className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300"
             />
           </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] text-slate-400 block mb-0.5">Ngày mất (nếu đã qua đời)</label>
+          <input
+            type="date"
+            value={deathDate}
+            onChange={(e) => setDeathDate(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300"
+          />
         </div>
 
         <textarea

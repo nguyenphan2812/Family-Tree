@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if the current user is an authorized editor
+    function isEditor(familyId) {
+      return request.auth != null &&
+        request.auth.token.email != null &&
+        request.auth.token.email in get(/databases/$(database)/documents/families/$(familyId)).data.editorEmails;
+    }
+
+    match /families/{familyId} {
+      // Public read access for the family tree
+      allow read: if true;
+      // Only approved editors can update the family metadata or editor list
+      allow write: if isEditor(familyId);
+
+      match /people/{personId} {
+        allow read: if true;
+        allow write: if isEditor(familyId);
+      }
+
+      match /marriages/{marriageId} {
+        allow read: if true;
+        allow write: if isEditor(familyId);
+      }
+    }
+  }
+}

@@ -63,7 +63,8 @@ export function TreeSearchBar({ people, personGenerations, onSelectPerson }: Pro
         <div className="absolute top-full left-0 mt-1.5 w-full bg-slate-900 border border-slate-700 rounded-lg shadow-2xl max-h-60 overflow-y-auto py-1">
           {filtered.slice(0, 8).map((p) => {
             const gen = personGenerations.get(p.id) ?? 1;
-            const year = p.birthDate ? new Date(p.birthDate).getFullYear() : null;
+            const parsedYear = p.birthDate ? new Date(p.birthDate).getFullYear() : null;
+            const year = parsedYear && !isNaN(parsedYear) ? parsedYear : null;
 
             return (
               <button
@@ -93,6 +94,12 @@ export function TreeSearchBar({ people, personGenerations, onSelectPerson }: Pro
               </button>
             );
           })}
+        </div>
+      )}
+
+      {open && query.trim() && filtered.length === 0 && (
+        <div className="absolute top-full left-0 mt-1.5 w-full bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-3 text-center text-xs text-slate-400">
+          Không tìm thấy thành viên phù hợp
         </div>
       )}
     </div>
