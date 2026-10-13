@@ -17,6 +17,7 @@ import { useMarriages } from "@/src/features/marriage/hooks/useMarriages";
 import { useMarriageMutations } from "@/src/features/marriage/hooks/useMarriageMutations";
 import { useIsEditor } from "@/src/features/auth/hooks/useIsEditor";
 import { useAuth } from "@/src/features/auth/hooks/useAuth";
+import { ManageEditorsModal } from "@/src/features/auth/components/ManageEditorsModal";
 import { buildGraph } from "../utils/buildGraph";
 import { PersonNode } from "../context/PersonNode";
 import { UnionNode } from "./UnionNode";
@@ -68,6 +69,7 @@ function TreeCanvasInner() {
   const [addingChildTargetMarriageId, setAddingChildTargetMarriageId] = useState<string | null>(null);
   const [isAddingRootTree, setIsAddingRootTree] = useState(false);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+  const [showManageEditors, setShowManageEditors] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
 
   // Layout calculation
@@ -744,10 +746,17 @@ function TreeCanvasInner() {
               </button>
             )}
 
-            {/* Reset Button (Editors only) */}
+            {/* Editor Actions (Editors only) */}
             {isEditor && (
               <>
                 <span className="text-slate-600">•</span>
+                <button
+                  onClick={() => setShowManageEditors(true)}
+                  className="px-2.5 py-1 rounded bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-700/80 text-indigo-300 hover:text-indigo-100 text-[11px] font-medium flex items-center gap-1 cursor-pointer transition shadow"
+                  title="Thêm và quản lý người dùng có quyền Editor"
+                >
+                  👥 Thêm Editor
+                </button>
                 <button
                   onClick={() => setShowConfirmReset(true)}
                   className="px-2.5 py-1 rounded bg-red-950/90 hover:bg-red-900 border border-red-700/80 text-red-300 hover:text-red-100 text-[11px] font-medium flex items-center gap-1 cursor-pointer transition shadow"
@@ -918,6 +927,11 @@ function TreeCanvasInner() {
             onSubmit={handleSaveChild}
             onCancel={() => setAddingChildTargetMarriageId(null)}
           />
+        )}
+
+        {/* Modal: Manage Editors */}
+        {showManageEditors && (
+          <ManageEditorsModal onClose={() => setShowManageEditors(false)} />
         )}
 
         {/* Modal: Confirm Reset All Data */}

@@ -5,14 +5,23 @@ service cloud.firestore {
     function isEditor(familyId) {
       return request.auth != null &&
         request.auth.token.email != null &&
-        request.auth.token.email in get(/databases/$(database)/documents/families/$(familyId)).data.editorEmails;
+        (
+          request.auth.token.email in get(/databases/$(database)/documents/families/$(familyId)).data.editorEmails ||
+          request.auth.token.email.lower() in get(/databases/$(database)/documents/families/$(familyId)).data.editorEmails
+        );
     }
 
     match /families/{familyId} {
       // Public read access for the family tree
       allow read: if true;
-      // Only approved editors can update the family metadata or editor list
-      allow write: if isEditor(familyId);
+      // Allow editors to update the family metadata or editor list
+      allow write: if request.auth != null &&
+        request.auth.token.email != null &&
+        (
+          resource == null ||
+          request.auth.token.email in resource.data.editorEmails ||
+          request.auth.token.email.lower() in resource.data.editorEmails
+        );
 
       match /people/{personId} {
         allow read: if true;
