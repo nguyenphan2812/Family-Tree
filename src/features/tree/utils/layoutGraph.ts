@@ -64,6 +64,233 @@ function interleaveGeneration(genPeople: Node[], genUnions: Node[]): Node[] {
 }
 
 /**
+ * Resolves horizontal collisions tier-by-tier.
+ * Treats married couples/clusters as rigid blocks so spouses are never torn apart.
+ * Iteratively sweeps left-to-right to push overlapping blocks, then re-centers parents above children.
+ */
+function resolveTierCollisions(
+  allGens: number[],
+  nodes: Node[],
+  positionById: Map<string, { x: number; y: number }>,
+  childrenByUnion: Map<string, string[]>,
+  unionsByPerson: Map<string, Node[]>
+) {
+  const nodeById = new Map<string, Node>(nodes.map((n) => [n.id, n]));
+
+  function getNodeBox(id: string): { left: number; right: number; width: number } | null {
+    const pos = positionById.get(id);
+    if (!pos) return null;
+    const n = nodeById.get(id);
+    const width = n?.type === "union" ? UNION_NODE_SIZE : PERSON_NODE_WIDTH;
+    return { left: pos.x, right: pos.x + width, width };
+  }
+
+  function getGenerationClusters(gen: number): { ids: Set<string>; minX: number; maxX: number }[] {
+    // Unpositioned nodes are excluded (layoutExpanded warns about them in dev) so they can't
+    // masquerade as sitting at x = 0 and distort the collision sweep.
+    const genNodes = nodes.filter(
+      (n) => ((n.data as { generation?: number })?.generation ?? 1) === gen && positionById.has(n.id)
+    );
+    const genNodeIds = new Set(genNodes.map((n) => n.id));
+    const visited = new Set<string>();
+    const clusters: { ids: Set<string>; minX: number; maxX: number }[] = [];
+
+    for (const node of genNodes) {
+      if (visited.has(node.id)) continue;
+
+      const clusterIds = new Set<string>();
+      const queue = [node.id];
+      visited.add(node.id);
+
+      while (queue.length > 0) {
+        const curId = queue.shift()!;
+        clusterIds.add(curId);
+        const curNode = nodeById.get(curId);
+        if (!curNode) continue;
+
+        if (curNode.type === "person") {
+          const pUnions = (unionsByPerson.get(curId) ?? []).filter(
+            (u) => ((u.data as { generation?: number })?.generation ?? 1) === gen && genNodeIds.has(u.id)
+          );
+          for (const u of pUnions) {
+            if (!visited.has(u.id)) {
+              visited.add(u.id);
+              queue.push(u.id);
+            }
+          }
+        } else if (curNode.type === "union") {
+          const { leftNodeId, rightNodeId } = (curNode.data as { leftNodeId?: string; rightNodeId?: string }) ?? {};
+          if (leftNodeId && genNodeIds.has(leftNodeId) && !visited.has(leftNodeId)) {
+            visited.add(leftNodeId);
+            queue.push(leftNodeId);
+          }
+          if (rightNodeId && genNodeIds.has(rightNodeId) && !visited.has(rightNodeId)) {
+            visited.add(rightNodeId);
+            queue.push(rightNodeId);
+          }
+        }
+      }
+
+      let minX = Infinity;
+      let maxX = -Infinity;
+      for (const id of clusterIds) {
+        const box = getNodeBox(id);
+        if (!box) continue;
+        if (box.left < minX) minX = box.left;
+        if (box.right > maxX) maxX = box.right;
+      }
+
+      clusters.push({ ids: clusterIds, minX, maxX });
+    }
+
+    return clusters;
+  }
+
+  function shiftCluster(cluster: { ids: Set<string>; minX: number; maxX: number }, dx: number) {
+    if (dx === 0) return;
+    for (const id of cluster.ids) {
+      const pos = positionById.get(id);
+      if (pos) {
+        positionById.set(id, { x: pos.x + dx, y: pos.y });
+      }
+    }
+    cluster.minX += dx;
+    cluster.maxX += dx;
+  }
+
+  function shiftDescendants(personId: string, dx: number, visitedPersons = new Set<string>()) {
+    if (visitedPersons.has(personId) || dx === 0) return;
+    visitedPersons.add(personId);
+
+    const pUnions = unionsByPerson.get(personId) ?? [];
+    for (const u of pUnions) {
+      const children = childrenByUnion.get(u.id) ?? [];
+      for (const cid of children) {
+        const cPos = positionById.get(cid);
+        if (cPos) {
+          positionById.set(cid, { x: cPos.x + dx, y: cPos.y });
+        }
+        const cUnions = unionsByPerson.get(cid) ?? [];
+        for (const cu of cUnions) {
+          const cuPos = positionById.get(cu.id);
+          if (cuPos) {
+            positionById.set(cu.id, { x: cuPos.x + dx, y: cuPos.y });
+          }
+          const { leftNodeId, rightNodeId } = (cu.data as { leftNodeId?: string; rightNodeId?: string }) ?? {};
+          const spouseId = leftNodeId === cid ? rightNodeId : leftNodeId;
+          if (spouseId) {
+            const sPos = positionById.get(spouseId);
+            if (sPos) {
+              positionById.set(spouseId, { x: sPos.x + dx, y: sPos.y });
+            }
+          }
+        }
+        shiftDescendants(cid, dx, visitedPersons);
+      }
+    }
+  }
+
+  // Left-to-right sweep on each tier to resolve collisions.
+  // withDescendants: also drag the pushed cluster's descendants along (keeps children under parents).
+  function sweepTiers(withDescendants: boolean): boolean {
+    let shifted = false;
+    for (const gen of allGens) {
+      const clusters = getGenerationClusters(gen);
+      clusters.sort((a, b) => a.minX - b.minX);
+
+      for (let i = 1; i < clusters.length; i++) {
+        const prev = clusters[i - 1];
+        const curr = clusters[i];
+        const minGap = SIBLING_GAP;
+
+        if (curr.minX < prev.maxX + minGap) {
+          const shift = prev.maxX + minGap - curr.minX;
+          shiftCluster(curr, shift);
+          if (withDescendants) {
+            for (const id of curr.ids) {
+              shiftDescendants(id, shift);
+            }
+          }
+          shifted = true;
+        }
+      }
+    }
+    return shifted;
+  }
+
+  // Iterative relaxation passes
+  const MAX_ITERATIONS = 4;
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    let hasShift = false;
+
+    // Phase 1: Left-to-right sweep on each tier to resolve collisions
+    if (sweepTiers(true)) hasShift = true;
+
+    // Phase 2: Bottom-up centering of parents over their children
+    for (let gIdx = allGens.length - 2; gIdx >= 0; gIdx--) {
+      const gen = allGens[gIdx];
+      const clusters = getGenerationClusters(gen);
+
+      for (const cluster of clusters) {
+        const uNodes = Array.from(cluster.ids)
+          .map((id) => nodeById.get(id))
+          .filter((n): n is Node => n?.type === "union" && (childrenByUnion.get(n.id)?.length ?? 0) > 0);
+
+        if (uNodes.length === 0) continue;
+
+        const primaryU = uNodes[0];
+        const children = childrenByUnion.get(primaryU.id) ?? [];
+        if (children.length === 0) continue;
+
+        let minChildX = Infinity;
+        let maxChildX = -Infinity;
+        for (const cid of children) {
+          const cPos = positionById.get(cid);
+          if (cPos) {
+            if (cPos.x < minChildX) minChildX = cPos.x;
+            if (cPos.x + PERSON_NODE_WIDTH > maxChildX) maxChildX = cPos.x + PERSON_NODE_WIDTH;
+          }
+        }
+
+        if (minChildX !== Infinity && maxChildX !== -Infinity) {
+          const childrenCenterX = (minChildX + maxChildX) / 2;
+          const curUnionPos = positionById.get(primaryU.id);
+          if (curUnionPos) {
+            const curUnionCenter = curUnionPos.x + UNION_NODE_SIZE / 2;
+            const diff = childrenCenterX - curUnionCenter;
+            if (Math.abs(diff) > 2) {
+              shiftCluster(cluster, diff);
+              hasShift = true;
+            }
+          }
+        }
+      }
+    }
+
+    // Phase 3: Push back to x >= 40 if shifted left
+    for (const gen of allGens) {
+      const clusters = getGenerationClusters(gen);
+      if (clusters.length === 0) continue;
+      clusters.sort((a, b) => a.minX - b.minX);
+      if (clusters[0].minX < 40) {
+        const diff = 40 - clusters[0].minX;
+        for (const cluster of clusters) {
+          shiftCluster(cluster, diff);
+        }
+        hasShift = true;
+      }
+    }
+
+    if (!hasShift) break;
+  }
+
+  // Final guarantee: Phase 2 may re-center two parent clusters onto the same spot when their
+  // children stand side by side (e.g. groom's parents and bride's parents). Non-overlap wins over
+  // perfect centering; descendants are not dragged so the groom's branch isn't pulled along.
+  sweepTiers(false);
+}
+
+/**
  * 1. EXPANDED LAYOUT (Mở rộng tất cả)
  * Thuật toán phân tầng thế hệ tất định:
  * - Format nghiêm ngặt: Mỗi đời chỉ nằm trên đúng 1 đường ngang duy nhất (cùng Y tier).
@@ -266,52 +493,165 @@ async function layoutExpanded(nodes: Node[], edges: Edge[]): Promise<LayoutResul
     }
   }
 
+  // Unions placed by the in-law pass below (parents of someone who married into the tree).
+  // Their not-yet-positioned children (siblings of the in-law) are appended next to the
+  // already-positioned child instead of being centered under the union.
+  const inLawUnionIds = new Set<string>();
+
   // 2. Position subsequent generations (Gen 2, 3...)
-  for (const gen of allGens) {
-    if (gen === 1) continue;
-    const tierY = genYMap.get(gen) ?? 0;
-    const parentUnions = unionNodes
-      .filter((u) => ((u.data as { generation?: number })?.generation ?? 1) === gen - 1)
-      .sort((a, b) => (positionById.get(a.id)?.x ?? 0) - (positionById.get(b.id)?.x ?? 0));
+  // Re-run after each in-law pass so siblings of in-laws (and their descendants) get placed too.
+  const placeDescendants = () => {
+    for (const gen of allGens) {
+      if (gen === 1) continue;
+      const tierY = genYMap.get(gen) ?? 0;
+      const parentUnions = unionNodes
+        .filter((u) => ((u.data as { generation?: number })?.generation ?? 1) === gen - 1)
+        .sort((a, b) => (positionById.get(a.id)?.x ?? 0) - (positionById.get(b.id)?.x ?? 0));
 
-    for (const pu of parentUnions) {
-      const children = childrenByUnion.get(pu.id) ?? [];
-      if (children.length === 0) continue;
+      for (const pu of parentUnions) {
+        const children = childrenByUnion.get(pu.id) ?? [];
+        if (children.length === 0) continue;
 
-      const puPos = positionById.get(pu.id);
-      const unionCenterX = puPos ? puPos.x + UNION_NODE_SIZE / 2 : 40;
+        // A union without a position (e.g. parents of an in-law at Gen >= 2) must not place its
+        // children at a fallback x — that would steal the in-law away from their spouse.
+        // The in-law pass below positions such unions above their children afterwards.
+        const puPos = positionById.get(pu.id);
+        if (!puPos) continue;
+        const unionCenterX = puPos.x + UNION_NODE_SIZE / 2;
 
-      const clusterW = getClusterWidth(pu.id);
-      const startX = unionCenterX - clusterW / 2;
+        const clusterW = getClusterWidth(pu.id);
+        const startX = unionCenterX - clusterW / 2;
 
-      let curChildX = startX;
-      for (const cid of children) {
-        const uWidth = getSubtreeWidth(cid);
-        positionById.set(cid, { x: curChildX, y: tierY });
-
-        // Position any marriages of this child in this generation
-        const cUnions = (unionsByPerson.get(cid) ?? []).filter(
-          (u) => ((u.data as { generation?: number })?.generation ?? 1) === gen
-        );
-        let spouseX = curChildX + PERSON_NODE_WIDTH + SPOUSE_UNION_GAP;
-        for (const cu of cUnions) {
-          const { leftNodeId, rightNodeId } = (cu.data as { leftNodeId?: string; rightNodeId?: string }) ?? {};
-          const spouseId = leftNodeId === cid ? rightNodeId : leftNodeId;
-          positionById.set(cu.id, {
-            x: spouseX,
-            y: tierY + (PERSON_NODE_HEIGHT - UNION_NODE_SIZE) / 2,
-          });
-          spouseX += UNION_NODE_SIZE + SPOUSE_UNION_GAP;
-          if (spouseId && nodeById.has(spouseId)) {
-            positionById.set(spouseId, { x: spouseX, y: tierY });
-            spouseX += PERSON_NODE_WIDTH + SPOUSE_UNION_GAP;
+        let curChildX = startX;
+        if (inLawUnionIds.has(pu.id)) {
+          let rightmostPlacedX = -Infinity;
+          for (const cid of children) {
+            const cPos = positionById.get(cid);
+            if (cPos && cPos.x > rightmostPlacedX) rightmostPlacedX = cPos.x;
+          }
+          if (rightmostPlacedX !== -Infinity) {
+            curChildX = rightmostPlacedX + PERSON_NODE_WIDTH + SIBLING_GAP;
           }
         }
+        for (const cid of children) {
+          if (inLawUnionIds.has(pu.id) && positionById.has(cid)) continue;
+          const uWidth = getSubtreeWidth(cid);
+          if (!positionById.has(cid)) {
+            positionById.set(cid, { x: curChildX, y: tierY });
+          }
 
-        curChildX += uWidth + SIBLING_GAP;
+          // Position any marriages of this child in this generation
+          const cUnions = (unionsByPerson.get(cid) ?? []).filter(
+            (u) => ((u.data as { generation?: number })?.generation ?? 1) === gen
+          );
+          let spouseX = (positionById.get(cid)?.x ?? curChildX) + PERSON_NODE_WIDTH + SPOUSE_UNION_GAP;
+          for (const cu of cUnions) {
+            const { leftNodeId, rightNodeId } = (cu.data as { leftNodeId?: string; rightNodeId?: string }) ?? {};
+            const spouseId = leftNodeId === cid ? rightNodeId : leftNodeId;
+            if (!positionById.has(cu.id)) {
+              positionById.set(cu.id, {
+                x: spouseX,
+                y: tierY + (PERSON_NODE_HEIGHT - UNION_NODE_SIZE) / 2,
+              });
+            }
+            spouseX += UNION_NODE_SIZE + SPOUSE_UNION_GAP;
+            if (spouseId && nodeById.has(spouseId) && !positionById.has(spouseId)) {
+              positionById.set(spouseId, { x: spouseX, y: tierY });
+              spouseX += PERSON_NODE_WIDTH + SPOUSE_UNION_GAP;
+            }
+          }
+
+          const marriageWidth = cUnions.length > 0
+            ? PERSON_NODE_WIDTH + (UNION_NODE_SIZE + SPOUSE_UNION_GAP * 2 + PERSON_NODE_WIDTH) * cUnions.length
+            : PERSON_NODE_WIDTH;
+          const totalW = Math.max(marriageWidth, uWidth);
+          curChildX += totalW + SIBLING_GAP;
+        }
       }
     }
+  };
+
+  // 2b. In-law pass (bottom-up): unions that are still unpositioned — typically the parents
+  // (and grandparents) of someone who married into the tree at Gen >= 2. Each is placed on its own
+  // generation tier, centered above its already-positioned children, with spouses on either side
+  // using the same union/spouse spacing as above. Collisions are left to resolveTierCollisions.
+  const placeInLaws = (): boolean => {
+    let placedAny = false;
+    for (let gIdx = allGens.length - 1; gIdx >= 0; gIdx--) {
+      const gen = allGens[gIdx];
+      const tierY = genYMap.get(gen) ?? 0;
+      const unionY = tierY + (PERSON_NODE_HEIGHT - UNION_NODE_SIZE) / 2;
+
+      for (const u of unionNodes) {
+        if (((u.data as { generation?: number })?.generation ?? 1) !== gen) continue;
+        if (positionById.has(u.id)) continue;
+
+        const { leftNodeId, rightNodeId } = (u.data as { leftNodeId?: string; rightNodeId?: string }) ?? {};
+        const leftPos = leftNodeId ? positionById.get(leftNodeId) : undefined;
+        const rightPos = rightNodeId ? positionById.get(rightNodeId) : undefined;
+
+        let unionX: number | null = null;
+        if (leftPos) {
+          unionX = leftPos.x + PERSON_NODE_WIDTH + SPOUSE_UNION_GAP;
+        } else if (rightPos) {
+          unionX = rightPos.x - SPOUSE_UNION_GAP - UNION_NODE_SIZE;
+        } else {
+          let minChildX = Infinity;
+          let maxChildX = -Infinity;
+          for (const cid of childrenByUnion.get(u.id) ?? []) {
+            const cPos = positionById.get(cid);
+            if (!cPos) continue;
+            if (cPos.x < minChildX) minChildX = cPos.x;
+            if (cPos.x + PERSON_NODE_WIDTH > maxChildX) maxChildX = cPos.x + PERSON_NODE_WIDTH;
+          }
+          if (minChildX !== Infinity) {
+            unionX = (minChildX + maxChildX) / 2 - UNION_NODE_SIZE / 2;
+          }
+        }
+        if (unionX === null) continue;
+
+        positionById.set(u.id, { x: unionX, y: unionY });
+        if (leftNodeId && nodeById.has(leftNodeId) && !leftPos) {
+          positionById.set(leftNodeId, { x: unionX - SPOUSE_UNION_GAP - PERSON_NODE_WIDTH, y: tierY });
+        }
+        if (rightNodeId && nodeById.has(rightNodeId) && !rightPos) {
+          positionById.set(rightNodeId, { x: unionX + UNION_NODE_SIZE + SPOUSE_UNION_GAP, y: tierY });
+        }
+        inLawUnionIds.add(u.id);
+        placedAny = true;
+      }
+    }
+    return placedAny;
+  };
+
+  placeDescendants();
+  for (let pass = 0; pass <= allGens.length; pass++) {
+    if (!placeInLaws()) break;
+    placeDescendants();
   }
+
+  if (process.env.NODE_ENV !== "production") {
+    const unpositioned = nodes.filter((n) => !positionById.has(n.id));
+    if (unpositioned.length > 0) {
+      console.warn(
+        "[layoutGraph] Nodes without a computed position (will render at 0,0):",
+        unpositioned.map((n) => ({
+          id: n.id,
+          type: n.type,
+          generation: (n.data as { generation?: number })?.generation,
+        }))
+      );
+    }
+  }
+
+  // 3. Resolve all tier collisions and iteratively align parents above children
+  resolveTierCollisions(
+    allGens,
+    nodes,
+    positionById,
+    childrenByUnion,
+    unionsByPerson
+  );
 
   // 3. Staggered busY lanes for orthogonal drop lines
   const unionBusYMap = new Map<string, number>();

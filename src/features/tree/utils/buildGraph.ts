@@ -222,11 +222,11 @@ export function buildGraph(
       const outerIdx = personOrderMap.get(outerId) ?? 0;
 
       if (outerIdx < sharedIdx) {
-        leftNodeId = orderedVisiblePeople[outerIdx]?.id ?? outerId;
-        rightNodeId = orderedVisiblePeople[outerIdx + 1]?.id ?? sharedId;
+        leftNodeId = outerId;
+        rightNodeId = sharedId;
       } else {
-        leftNodeId = orderedVisiblePeople[outerIdx - 1]?.id ?? sharedId;
-        rightNodeId = orderedVisiblePeople[outerIdx]?.id ?? outerId;
+        leftNodeId = sharedId;
+        rightNodeId = outerId;
       }
     } else if (visibleSpouses.length === 1) {
       leftNodeId = visibleSpouses[0];
