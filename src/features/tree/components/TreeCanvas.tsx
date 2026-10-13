@@ -23,6 +23,7 @@ import { PersonNode } from "../context/PersonNode";
 import { UnionNode } from "./UnionNode";
 import { TreeContext } from "../context/TreeContext";
 import { PersonFormModal, PersonFormData } from "./PersonFormModal";
+import { PersonDetailModal } from "./PersonDetailModal";
 import { AddParentModal } from "./AddParentModal";
 import { AddSpouseModal } from "./AddSpouseModal";
 import { SelectSpouseForChildModal } from "./SelectSpouseForChildModal";
@@ -62,6 +63,7 @@ function TreeCanvasInner() {
 
   // Modal states
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
+  const [viewingPersonId, setViewingPersonId] = useState<string | null>(null);
   const [addingParentForChildId, setAddingParentForChildId] = useState<string | null>(null);
   const [addingSpouseForPersonId, setAddingSpouseForPersonId] = useState<string | null>(null);
   const [addingSpouseDirection, setAddingSpouseDirection] = useState<"left" | "right">("right");
@@ -483,6 +485,18 @@ function TreeCanvasInner() {
     return node?.data?.person as Person | undefined;
   }, [editingPersonId, people, graphNodes]);
 
+  const viewingPerson = useMemo(() => {
+    if (!viewingPersonId) return undefined;
+    const fromPeople = people.find((p) => p.id === viewingPersonId);
+    if (fromPeople) return fromPeople;
+    const node = graphNodes.find((n) => n.id === viewingPersonId);
+    return node?.data?.person as Person | undefined;
+  }, [viewingPersonId, people, graphNodes]);
+
+  const viewingPersonGeneration = viewingPersonId
+    ? personGenerations.get(viewingPersonId)
+    : undefined;
+
   const handleEditSave = useCallback(
     async (data: PersonFormData) => {
       if (!editingPersonId) return;
@@ -696,6 +710,7 @@ function TreeCanvasInner() {
       value={{
         isEditor,
         onEditPerson: setEditingPersonId,
+        onViewPerson: setViewingPersonId,
         onAddParent: handleOpenAddParent,
         onAddSpouse: handleOpenAddSpouse,
         onAddChildToPerson: handleOpenAddChildToPerson,
@@ -832,6 +847,17 @@ function TreeCanvasInner() {
             style={{ width: 220, height: 160 }}
           />
         </ReactFlow>
+
+        {/* Modal: View Person Details (Read-only for non-editors / visitors) */}
+        {viewingPerson && (
+          <PersonDetailModal
+            person={viewingPerson}
+            generation={viewingPersonGeneration}
+            people={people}
+            marriages={marriages}
+            onClose={() => setViewingPersonId(null)}
+          />
+        )}
 
         {/* Modal: Edit Person */}
         {editingPerson && (

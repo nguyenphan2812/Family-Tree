@@ -6,6 +6,7 @@ import { PersonFormData } from "../components/PersonFormModal";
 interface TreeContextValue {
   isEditor: boolean;
   onEditPerson: (personId: string) => void;
+  onViewPerson: (personId: string) => void;
   onAddParent: (childPersonId: string) => void;
   onAddSpouse: (personId: string, direction?: "left" | "right") => void;
   onAddChildToPerson: (parentPersonId: string) => void;

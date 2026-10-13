@@ -11,6 +11,7 @@ export function PersonNode({ id, data }: NodeProps) {
   const {
     isEditor,
     onEditPerson,
+    onViewPerson,
     onAddParent,
     onAddSpouse,
     onAddChildToPerson,
@@ -69,8 +70,8 @@ export function PersonNode({ id, data }: NodeProps) {
     ? `${person.lastName} ${person.firstName}`
     : person.firstName;
 
-  // Show action buttons ONLY when hovered and NOT placeholder
-  const showActionButtons = hovered && !isPlaceholder;
+  // Show action buttons ONLY when user is an editor, hovered, and NOT placeholder
+  const showActionButtons = isEditor && hovered && !isPlaceholder;
 
   const handleAction = (callback: () => void) => {
     if (!isEditor) {
@@ -92,7 +93,11 @@ export function PersonNode({ id, data }: NodeProps) {
       }}
       onClick={() => {
         onSelectPerson(id);
-        if (isEditor) onEditPerson(id);
+        if (isEditor) {
+          onEditPerson(id);
+        } else {
+          onViewPerson(id);
+        }
       }}
       className={`relative rounded-2xl border p-2 flex flex-col items-center justify-between text-center cursor-pointer transition-all shadow-md bg-slate-900/95 backdrop-blur-sm ${genderBg} ${borderColor}`}
       style={{
