@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import { PersonFormData } from "../components/PersonFormModal";
 
 interface TreeContextValue {
   isEditor: boolean;
@@ -13,13 +12,11 @@ interface TreeContextValue {
   onAddChildToMarriage: (marriageId: string) => void;
   onToggleCollapseMarriage: (marriageId: string) => void;
   onSelectPerson: (personId: string) => void;
-  onAddTree: (data: PersonFormData) => void;
   onRequireAuth: () => void;
   hoveredUnionId: string | null;
   hoveredPersonId: string | null;
   setHoveredUnionId: (id: string | null) => void;
   setHoveredPersonId: (id: string | null) => void;
-  activeNodeIds: Set<string> | null;
   selectedPersonId: string | null;
 }
 

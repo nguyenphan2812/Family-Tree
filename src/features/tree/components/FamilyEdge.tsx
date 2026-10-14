@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import { EdgeProps, BaseEdge, getSmoothStepPath, Position } from "@xyflow/react";
 
 /**

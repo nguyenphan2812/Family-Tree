@@ -152,13 +152,13 @@ export function AddSpouseModal({
           <input
             placeholder="Họ (Last name)"
             value={lastName}
+            autoFocus
             onChange={(e) => setLastName(e.target.value)}
             className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
           />
           <input
             placeholder="Tên (First name)"
             value={firstName}
-            autoFocus
             onChange={(e) => setFirstName(e.target.value)}
             required
             className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"

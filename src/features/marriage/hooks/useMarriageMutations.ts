@@ -1,6 +1,6 @@
 "use client";
 
-import { doc, writeBatch, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { doc, writeBatch, updateDoc, arrayUnion } from "firebase/firestore";
 import { marriagesCollection, marriageDoc, personDoc } from "@/src/lib/queries";
 import { db } from "@/src/lib/firebase";
 import { MarriageStatus } from "@/src/types/family";
@@ -68,17 +68,8 @@ export function useMarriageMutations() {
     });
   }
 
-  async function deleteMarriage(marriageId: string, spouseIds: string[]) {
-    const batch = writeBatch(db);
-    for (const personId of spouseIds) {
-      batch.update(personDoc(personId), { marriageIds: arrayRemove(marriageId) });
-    }
-    batch.delete(marriageDoc(marriageId));
-    await batch.commit();
-  }
-
   // Removes a person from every marriage they're part of (as spouse or child),
-  // deleting any marriage that becomes fully empty as a result.
+  // deleting any marriage that becomes empty of spouses as a result.
   async function removePersonFromAllMarriages(personId: string, allMarriages: { id: string; spouseIds: string[]; childrenIds: string[] }[]) {
     const affected = allMarriages.filter(
       (m) => m.spouseIds.includes(personId) || m.childrenIds.includes(personId)
@@ -91,7 +82,9 @@ export function useMarriageMutations() {
       const newSpouseIds = marriage.spouseIds.filter((id) => id !== personId);
       const newChildrenIds = marriage.childrenIds.filter((id) => id !== personId);
 
-      if (newSpouseIds.length === 0 && newChildrenIds.length === 0) {
+      // If no spouses remain, the marriage no longer has parents and must be deleted.
+      // (Children remain intact in the tree as independent people without parents).
+      if (newSpouseIds.length === 0) {
         batch.delete(marriageDoc(marriage.id));
       } else {
         batch.update(marriageDoc(marriage.id), {
@@ -107,7 +100,6 @@ export function useMarriageMutations() {
     createMarriage,
     addSpouseToMarriage,
     addChildToMarriage,
-    deleteMarriage,
     removePersonFromAllMarriages,
   };
 }
