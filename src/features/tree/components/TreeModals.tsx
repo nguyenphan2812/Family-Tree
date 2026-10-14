@@ -86,7 +86,17 @@ export function TreeModals({ people, marriages, modals }: TreeModalsProps) {
           }}
           onSubmit={handleEditSave}
           onCancel={() => setEditingPersonId(null)}
-          onDelete={editingPerson.isPlaceholder ? undefined : handleEditDelete}
+          onDelete={handleEditDelete}
+          deleteLabel={
+            editingPerson.isPlaceholder
+              ? "🗑️ Xóa phối ngẫu khuyết danh khỏi cây"
+              : "🗑️ Xóa người này khỏi cây gia phả"
+          }
+          deleteConfirmMessage={
+            editingPerson.isPlaceholder
+              ? "⚠️ Bạn có chắc muốn xóa phối ngẫu (khuyết danh) này? Liên kết hôn nhân này sẽ bị xóa khỏi cây gia phả."
+              : undefined
+          }
         />
       )}
 

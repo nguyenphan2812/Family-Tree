@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback } from "react";
 import { Node } from "@xyflow/react";
 import { Person, Marriage } from "@/src/types/family";
 import { PersonFormData } from "../components/PersonFormModal";
+import { CreateMarriageParams } from "@/src/features/marriage/hooks/useMarriageMutations";
 import { resetTreeData } from "../utils/resetTreeData";
 import { selectModalEntities } from "./treeModalSelectors";
 
@@ -16,17 +17,12 @@ export interface UseTreeModalsProps {
   addPerson: (data: PersonFormData) => Promise<string>;
   updatePerson: (id: string, data: Partial<PersonFormData>) => Promise<void>;
   deletePerson: (id: string) => Promise<void>;
-  createMarriage: (data: {
-    spouseIds: string[];
-    order: number;
-    orderLabel?: string;
-    childrenIds?: string[];
-    isPlaceholder?: boolean;
-    direction?: "left" | "right";
-  }) => Promise<string>;
+  createMarriage: (data: CreateMarriageParams) => Promise<string>;
   addChildToMarriage: (marriageId: string, childId: string) => Promise<void>;
   addSpouseToMarriage: (marriageId: string, spouseId: string) => Promise<void>;
   removePersonFromAllMarriages: (personId: string, currentMarriages: Marriage[]) => Promise<void>;
+  deleteMarriage: (marriageId: string, currentMarriages: Marriage[]) => Promise<void>;
+  updateMarriage?: (marriageId: string, data: Partial<Marriage>) => Promise<void>;
   onResetComplete?: () => void;
 }
 
@@ -43,6 +39,8 @@ export function useTreeModals({
   addChildToMarriage,
   addSpouseToMarriage,
   removePersonFromAllMarriages,
+  deleteMarriage,
+  updateMarriage,
   onResetComplete,
 }: UseTreeModalsProps) {
   // Modal states
@@ -92,7 +90,7 @@ export function useTreeModals({
           spouseIds,
           order: 1,
           childrenIds: [addingParentForChildId],
-          isPlaceholder: spouseIds.length < 2,
+          isPlaceholder: false,
         });
       }
 
@@ -117,13 +115,13 @@ export function useTreeModals({
 
       const newSpouseId = await addPerson({
         ...data.spouseData,
-        spouseLabel: data.orderLabel,
+        spouseLabel: data.orderLabel || undefined,
       });
 
       await createMarriage({
         spouseIds: [addingSpouseForPersonId, newSpouseId],
         order: data.order,
-        orderLabel: data.orderLabel,
+        orderLabel: data.orderLabel || undefined,
         direction: addingSpouseDirection,
       });
 
@@ -147,7 +145,7 @@ export function useTreeModals({
         createMarriage({
           spouseIds: [parentPersonId],
           order: 1,
-          isPlaceholder: true,
+          isPlaceholder: false,
         }).then((newMId: string) => {
           setAddingChildTargetMarriageId(newMId);
         });
@@ -180,30 +178,15 @@ export function useTreeModals({
   );
 
   const entities = useMemo(
-    () =>
-      selectModalEntities({
-        people,
-        marriages,
-        graphNodes,
-        personGenerations,
-        editingPersonId,
-        viewingPersonId,
-        addingParentForChildId,
-        addingSpouseForPersonId,
-        selectingSpouseForChildParentId,
-        addingChildTargetMarriageId,
-      }),
+    () => selectModalEntities({
+      people, marriages, graphNodes, personGenerations,
+      editingPersonId, viewingPersonId, addingParentForChildId,
+      addingSpouseForPersonId, selectingSpouseForChildParentId, addingChildTargetMarriageId,
+    }),
     [
-      people,
-      marriages,
-      graphNodes,
-      personGenerations,
-      editingPersonId,
-      viewingPersonId,
-      addingParentForChildId,
-      addingSpouseForPersonId,
-      selectingSpouseForChildParentId,
-      addingChildTargetMarriageId,
+      people, marriages, graphNodes, personGenerations,
+      editingPersonId, viewingPersonId, addingParentForChildId,
+      addingSpouseForPersonId, selectingSpouseForChildParentId, addingChildTargetMarriageId,
     ]
   );
 
@@ -227,10 +210,20 @@ export function useTreeModals({
 
   const handleEditDelete = useCallback(async () => {
     if (!editingPersonId) return;
-    await removePersonFromAllMarriages(editingPersonId, marriages);
-    await deletePerson(editingPersonId);
+    if (editingPersonId.startsWith("placeholder-spouse-")) {
+      const marriageId = editingPersonId.replace("placeholder-spouse-", "");
+      const target = marriages.find((m) => m.id === marriageId);
+      if (target && target.childrenIds.length > 0 && updateMarriage) {
+        await updateMarriage(marriageId, { isPlaceholder: false });
+      } else {
+        await deleteMarriage(marriageId, marriages);
+      }
+    } else {
+      await removePersonFromAllMarriages(editingPersonId, marriages);
+      await deletePerson(editingPersonId);
+    }
     setEditingPersonId(null);
-  }, [editingPersonId, marriages, removePersonFromAllMarriages, deletePerson]);
+  }, [editingPersonId, marriages, updateMarriage, deleteMarriage, removePersonFromAllMarriages, deletePerson]);
 
   // Root Tree Add
   const handleAddTree = useCallback(

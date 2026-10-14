@@ -94,7 +94,9 @@ export async function layoutExpanded(nodes: Node[], edges: Edge[]): Promise<Layo
     let maxChildWidth = 0;
 
     for (const u of pUnions) {
-      selfWidth += UNION_NODE_SIZE + SPOUSE_UNION_GAP * 2 + PERSON_NODE_WIDTH;
+      const { leftNodeId, rightNodeId } = (u.data as { leftNodeId?: string; rightNodeId?: string }) ?? {};
+      const hasSpouse = (leftNodeId === pId ? rightNodeId : leftNodeId) != null;
+      selfWidth += SPOUSE_UNION_GAP * 2 + UNION_NODE_SIZE + (hasSpouse ? PERSON_NODE_WIDTH : 0);
       const children = childrenByUnion.get(u.id) ?? [];
       if (children.length > 0) {
         let cw = 0;
@@ -202,9 +204,12 @@ export async function layoutExpanded(nodes: Node[], edges: Edge[]): Promise<Layo
             }
           }
 
-          const marriageWidth = cUnions.length > 0
-            ? PERSON_NODE_WIDTH + (UNION_NODE_SIZE + SPOUSE_UNION_GAP * 2 + PERSON_NODE_WIDTH) * cUnions.length
-            : PERSON_NODE_WIDTH;
+          let marriageWidth = PERSON_NODE_WIDTH;
+          for (const cu of cUnions) {
+            const { leftNodeId, rightNodeId } = (cu.data as { leftNodeId?: string; rightNodeId?: string }) ?? {};
+            const hasSpouse = (leftNodeId === cid ? rightNodeId : leftNodeId) != null;
+            marriageWidth += SPOUSE_UNION_GAP * 2 + UNION_NODE_SIZE + (hasSpouse ? PERSON_NODE_WIDTH : 0);
+          }
           const totalW = Math.max(marriageWidth, uWidth);
           curChildX += totalW + SIBLING_GAP;
         }

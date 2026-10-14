@@ -29,24 +29,9 @@ export function AddSpouseModal({
   // Opposite gender default
   const defaultGender = person.gender === "female" ? "male" : "female";
 
-  // Suggest title based on order
-  const getSuggestedLabel = (order: number, gender: "male" | "female" | "other") => {
-    if (gender === "female") {
-      if (order === 1) return "Bà Cả (Chính thất)";
-      if (order === 2) return "Bà Hai (Kế thất)";
-      if (order === 3) return "Bà Ba";
-      if (order === 4) return "Bà Tư";
-      if (order === 5) return "Bà Năm";
-      return `Bà thứ ${order}`;
-    } else {
-      if (order === 1) return "Chồng (Chính phu)";
-      return `Chồng thứ ${order}`;
-    }
-  };
-
   const [order, setOrder] = useState(defaultOrder);
   const [gender, setGender] = useState<"male" | "female" | "other">(defaultGender);
-  const [orderLabel, setOrderLabel] = useState(getSuggestedLabel(defaultOrder, defaultGender));
+  const [orderLabel, setOrderLabel] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [birthDate, setBirthDate] = useState("");
@@ -55,12 +40,10 @@ export function AddSpouseModal({
 
   function handleOrderChange(newOrder: number) {
     setOrder(newOrder);
-    setOrderLabel(getSuggestedLabel(newOrder, gender));
   }
 
   function handleGenderChange(newGender: "male" | "female" | "other") {
     setGender(newGender);
-    setOrderLabel(getSuggestedLabel(order, newGender));
   }
 
   function handleSubmit(e: React.FormEvent) {

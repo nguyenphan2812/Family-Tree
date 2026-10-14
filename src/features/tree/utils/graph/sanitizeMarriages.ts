@@ -37,9 +37,14 @@ export function sanitizeMarriages(
     // If all spouses were deleted, this is an orphaned marriage and should not produce a union node.
     if (validSpouseIds.length === 0) continue;
 
+    // A marriage with only 1 spouse and no children should not produce a union or phantom placeholder.
+    if (validSpouseIds.length === 1 && validChildrenIds.length === 0) continue;
+
     const effectiveSpouseIds = [...validSpouseIds];
 
-    if (validSpouseIds.length === 1) {
+    // Only create a virtual placeholder spouse if the marriage is explicitly marked isPlaceholder
+    // and has children to connect to.
+    if (m.isPlaceholder && validSpouseIds.length === 1 && validChildrenIds.length > 0) {
       const singleSpouse = personById.get(validSpouseIds[0]);
       if (singleSpouse) {
         const placeholderId = `placeholder-spouse-${m.id}`;
@@ -48,9 +53,7 @@ export function sanitizeMarriages(
           firstName: singleSpouse.gender === "female" ? "Chồng" : "Vợ",
           lastName: "(Khuyết danh)",
           gender: singleSpouse.gender === "female" ? "male" : "female",
-          spouseLabel:
-            m.orderLabel ||
-            (singleSpouse.gender === "female" ? `Chồng thứ ${m.order}` : `Bà thứ ${m.order}`),
+          spouseLabel: m.orderLabel || undefined,
           marriageIds: [m.id],
           isPlaceholder: true,
         };

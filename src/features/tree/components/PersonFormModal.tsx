@@ -24,6 +24,8 @@ interface Props {
   onSubmit: (data: PersonFormData) => void;
   onCancel: () => void;
   onDelete?: () => void;
+  deleteLabel?: string;
+  deleteConfirmMessage?: string;
 }
 
 export function PersonFormModal({
@@ -34,6 +36,8 @@ export function PersonFormModal({
   onSubmit,
   onCancel,
   onDelete,
+  deleteLabel,
+  deleteConfirmMessage,
 }: Props) {
   const [firstName, setFirstName] = useState(initialData?.firstName ?? "");
   const [lastName, setLastName] = useState(initialData?.lastName ?? "");
@@ -230,7 +234,7 @@ export function PersonFormModal({
               onClick={() => setConfirmingDelete(true)}
               className="text-[11px] text-red-400 hover:text-red-300 hover:underline cursor-pointer transition"
             >
-              🗑️ Xóa người này khỏi cây gia phả
+              {deleteLabel ?? "🗑️ Xóa người này khỏi cây gia phả"}
             </button>
           </div>
         )}
@@ -239,7 +243,8 @@ export function PersonFormModal({
         {confirmingDelete && (
           <div className="p-3 rounded-xl bg-red-950/50 border border-red-800/80 flex flex-col gap-2.5 text-xs animate-in fade-in duration-150">
             <p className="text-red-200 leading-relaxed text-[11px]">
-              ⚠️ Bạn có chắc muốn xóa người này? Toàn bộ liên kết hôn nhân liên quan cũng sẽ được cập nhật. Hành động này không thể hoàn tác.
+              {deleteConfirmMessage ??
+                "⚠️ Bạn có chắc muốn xóa người này? Toàn bộ liên kết hôn nhân liên quan cũng sẽ được cập nhật. Hành động này không thể hoàn tác."}
             </p>
             <div className="flex gap-2">
               <button

@@ -1,21 +1,23 @@
 "use client";
 
-import { doc, writeBatch, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, writeBatch, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { marriagesCollection, marriageDoc, personDoc } from "@/src/lib/queries";
 import { db } from "@/src/lib/firebase";
-import { MarriageStatus } from "@/src/types/family";
+import { Marriage, MarriageStatus } from "@/src/types/family";
+
+export interface CreateMarriageParams {
+  spouseIds: string[];
+  order: number;
+  orderLabel?: string;
+  status?: MarriageStatus;
+  date?: string;
+  isPlaceholder?: boolean;
+  childrenIds?: string[];
+  direction?: "left" | "right";
+}
 
 export function useMarriageMutations() {
-  async function createMarriage(params: {
-    spouseIds: string[];
-    order: number;
-    orderLabel?: string;
-    status?: MarriageStatus;
-    date?: string;
-    isPlaceholder?: boolean;
-    childrenIds?: string[];
-    direction?: "left" | "right";
-  }) {
+  async function createMarriage(params: CreateMarriageParams) {
     const {
       spouseIds,
       order,
@@ -68,9 +70,16 @@ export function useMarriageMutations() {
     });
   }
 
+  async function updateMarriage(marriageId: string, data: Partial<Marriage>) {
+    await updateDoc(marriageDoc(marriageId), data);
+  }
+
   // Removes a person from every marriage they're part of (as spouse or child),
-  // deleting any marriage that becomes empty of spouses as a result.
-  async function removePersonFromAllMarriages(personId: string, allMarriages: { id: string; spouseIds: string[]; childrenIds: string[] }[]) {
+  // deleting any marriage that becomes empty of spouses or childless with only 1 spouse.
+  async function removePersonFromAllMarriages(
+    personId: string,
+    allMarriages: { id: string; spouseIds: string[]; childrenIds: string[] }[]
+  ) {
     const affected = allMarriages.filter(
       (m) => m.spouseIds.includes(personId) || m.childrenIds.includes(personId)
     );
@@ -82,14 +91,38 @@ export function useMarriageMutations() {
       const newSpouseIds = marriage.spouseIds.filter((id) => id !== personId);
       const newChildrenIds = marriage.childrenIds.filter((id) => id !== personId);
 
-      // If no spouses remain, the marriage no longer has parents and must be deleted.
-      // (Children remain intact in the tree as independent people without parents).
-      if (newSpouseIds.length === 0) {
+      // If no spouses remain, or if only 1 spouse remains and there are no children,
+      // the marriage has no purpose and must be deleted.
+      if (newSpouseIds.length === 0 || (newSpouseIds.length < 2 && newChildrenIds.length === 0)) {
         batch.delete(marriageDoc(marriage.id));
+        for (const sid of newSpouseIds) {
+          batch.update(personDoc(sid), {
+            marriageIds: arrayRemove(marriage.id),
+          });
+        }
       } else {
         batch.update(marriageDoc(marriage.id), {
           spouseIds: newSpouseIds,
           childrenIds: newChildrenIds,
+          isPlaceholder: false,
+        });
+      }
+    }
+    await batch.commit();
+  }
+
+  // Deletes a specific marriage and removes its ID from any spouse documents.
+  async function deleteMarriage(
+    marriageId: string,
+    currentMarriages: { id: string; spouseIds: string[] }[] = []
+  ) {
+    const target = currentMarriages.find((m) => m.id === marriageId);
+    const batch = writeBatch(db);
+    batch.delete(marriageDoc(marriageId));
+    if (target) {
+      for (const sid of target.spouseIds) {
+        batch.update(personDoc(sid), {
+          marriageIds: arrayRemove(marriageId),
         });
       }
     }
@@ -100,6 +133,8 @@ export function useMarriageMutations() {
     createMarriage,
     addSpouseToMarriage,
     addChildToMarriage,
+    updateMarriage,
     removePersonFromAllMarriages,
+    deleteMarriage,
   };
 }

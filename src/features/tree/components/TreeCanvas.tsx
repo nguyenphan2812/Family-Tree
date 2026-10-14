@@ -41,7 +41,9 @@ function TreeCanvasInner() {
     createMarriage,
     addChildToMarriage,
     addSpouseToMarriage,
+    updateMarriage,
     removePersonFromAllMarriages,
+    deleteMarriage,
   } = useMarriageMutations();
   const { isEditor, user } = useIsEditor();
   const { signIn, logOut } = useAuth();
@@ -109,6 +111,8 @@ function TreeCanvasInner() {
     addChildToMarriage,
     addSpouseToMarriage,
     removePersonFromAllMarriages,
+    deleteMarriage,
+    updateMarriage,
     onResetComplete: () => setSelectedPersonId(null),
   });
 

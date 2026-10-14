@@ -174,53 +174,67 @@ export function resolveTierCollisions(
       const clusters = getGenerationClusters(gen);
 
       for (const cluster of clusters) {
-        const uNodes = Array.from(cluster.ids)
+        const uNodesWithChildren = Array.from(cluster.ids)
           .map((id) => nodeById.get(id))
           .filter((n): n is Node => n?.type === "union" && (childrenByUnion.get(n.id)?.length ?? 0) > 0);
 
-        if (uNodes.length === 0) continue;
+        if (uNodesWithChildren.length === 0) continue;
 
-        const primaryU = uNodes[0];
-        const children = childrenByUnion.get(primaryU.id) ?? [];
-        if (children.length === 0) continue;
+        let totalDiff = 0;
+        let validCount = 0;
 
-        let minChildX = Infinity;
-        let maxChildX = -Infinity;
-        for (const cid of children) {
-          const cPos = positionById.get(cid);
-          if (cPos) {
-            if (cPos.x < minChildX) minChildX = cPos.x;
-            if (cPos.x + PERSON_NODE_WIDTH > maxChildX) maxChildX = cPos.x + PERSON_NODE_WIDTH;
+        for (const u of uNodesWithChildren) {
+          const children = childrenByUnion.get(u.id) ?? [];
+          if (children.length === 0) continue;
+
+          let minChildX = Infinity;
+          let maxChildX = -Infinity;
+          for (const cid of children) {
+            const cPos = positionById.get(cid);
+            if (cPos) {
+              if (cPos.x < minChildX) minChildX = cPos.x;
+              if (cPos.x + PERSON_NODE_WIDTH > maxChildX) maxChildX = cPos.x + PERSON_NODE_WIDTH;
+            }
+          }
+
+          if (minChildX !== Infinity && maxChildX !== -Infinity) {
+            const childrenCenterX = (minChildX + maxChildX) / 2;
+            const curUnionPos = positionById.get(u.id);
+            if (curUnionPos) {
+              const curUnionCenter = curUnionPos.x + UNION_NODE_SIZE / 2;
+              totalDiff += childrenCenterX - curUnionCenter;
+              validCount++;
+            }
           }
         }
 
-        if (minChildX !== Infinity && maxChildX !== -Infinity) {
-          const childrenCenterX = (minChildX + maxChildX) / 2;
-          const curUnionPos = positionById.get(primaryU.id);
-          if (curUnionPos) {
-            const curUnionCenter = curUnionPos.x + UNION_NODE_SIZE / 2;
-            const diff = childrenCenterX - curUnionCenter;
-            if (Math.abs(diff) > 2) {
-              shiftCluster(cluster, diff);
-              hasShift = true;
-            }
+        if (validCount > 0) {
+          const avgDiff = totalDiff / validCount;
+          if (Math.abs(avgDiff) > 2) {
+            shiftCluster(cluster, avgDiff);
+            hasShift = true;
           }
         }
       }
     }
 
-    // Phase 3: Push back to x >= 40 if shifted left
+    // Phase 3: Uniform global shift to ensure x >= 40 without breaking parent-child alignment
+    let globalMinX = Infinity;
     for (const gen of allGens) {
       const clusters = getGenerationClusters(gen);
-      if (clusters.length === 0) continue;
-      clusters.sort((a, b) => a.minX - b.minX);
-      if (clusters[0].minX < 40) {
-        const diff = 40 - clusters[0].minX;
-        for (const cluster of clusters) {
-          shiftCluster(cluster, diff);
-        }
-        hasShift = true;
+      for (const c of clusters) {
+        if (c.minX < globalMinX) globalMinX = c.minX;
       }
+    }
+    if (globalMinX < 40) {
+      const diff = 40 - globalMinX;
+      for (const gen of allGens) {
+        const clusters = getGenerationClusters(gen);
+        for (const c of clusters) {
+          shiftCluster(c, diff);
+        }
+      }
+      hasShift = true;
     }
 
     if (!hasShift) break;
