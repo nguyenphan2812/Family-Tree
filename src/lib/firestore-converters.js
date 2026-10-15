@@ -1,0 +1,79 @@
+function removeUndefined(obj) {
+    const result = {};
+    for (const key in obj) {
+        if (obj[key] !== undefined) {
+            result[key] = obj[key];
+        }
+    }
+    return result;
+}
+export const personConverter = {
+    toFirestore(person) {
+        return removeUndefined({
+            firstName: person.firstName,
+            lastName: person.lastName,
+            birthDate: person.birthDate,
+            deathDate: person.deathDate,
+            gender: person.gender,
+            photoURL: person.photoURL,
+            bio: person.bio,
+            marriageIds: person.marriageIds,
+            position: person.position,
+            generation: person.generation,
+            birthOrder: person.birthOrder,
+            spouseLabel: person.spouseLabel,
+            createdBy: person.createdBy,
+            createdAt: person.createdAt,
+            updatedAt: person.updatedAt,
+        });
+    },
+    fromFirestore(snapshot) {
+        const data = snapshot.data();
+        return {
+            id: snapshot.id,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            birthDate: data.birthDate,
+            deathDate: data.deathDate,
+            gender: data.gender,
+            photoURL: data.photoURL,
+            bio: data.bio,
+            marriageIds: data.marriageIds ?? [],
+            position: data.position,
+            generation: data.generation,
+            birthOrder: data.birthOrder,
+            spouseLabel: data.spouseLabel,
+            createdBy: data.createdBy,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+        };
+    },
+};
+export const marriageConverter = {
+    toFirestore(marriage) {
+        return removeUndefined({
+            spouseIds: marriage.spouseIds,
+            order: marriage.order,
+            orderLabel: marriage.orderLabel,
+            status: marriage.status,
+            date: marriage.date,
+            childrenIds: marriage.childrenIds,
+            isPlaceholder: marriage.isPlaceholder,
+            direction: marriage.direction,
+        });
+    },
+    fromFirestore(snapshot) {
+        const data = snapshot.data();
+        return {
+            id: snapshot.id,
+            spouseIds: data.spouseIds ?? [],
+            order: data.order ?? 1,
+            orderLabel: data.orderLabel,
+            status: data.status ?? "unknown",
+            date: data.date,
+            childrenIds: data.childrenIds ?? [],
+            isPlaceholder: data.isPlaceholder ?? false,
+            direction: data.direction,
+        };
+    },
+};

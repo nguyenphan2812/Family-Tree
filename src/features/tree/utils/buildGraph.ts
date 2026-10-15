@@ -172,11 +172,29 @@ export function buildGraph(
       const outerIdx = personOrderMap.get(outerId) ?? 0;
 
       if (outerIdx < sharedIdx) {
-        leftNodeId = outerId;
-        rightNodeId = sharedId;
+        const nextPerson = orderedVisiblePeople[outerIdx + 1];
+        const isSameGen =
+          nextPerson &&
+          (personGenerations.get(nextPerson.id) ?? 1) === (personGenerations.get(outerId) ?? 1);
+        if (outerIdx < sharedIdx - 1 && isSameGen) {
+          leftNodeId = outerId;
+          rightNodeId = nextPerson.id;
+        } else {
+          leftNodeId = outerId;
+          rightNodeId = sharedId;
+        }
       } else {
-        leftNodeId = sharedId;
-        rightNodeId = outerId;
+        const prevPerson = orderedVisiblePeople[outerIdx - 1];
+        const isSameGen =
+          prevPerson &&
+          (personGenerations.get(prevPerson.id) ?? 1) === (personGenerations.get(outerId) ?? 1);
+        if (outerIdx > sharedIdx + 1 && isSameGen) {
+          leftNodeId = prevPerson.id;
+          rightNodeId = outerId;
+        } else {
+          leftNodeId = sharedId;
+          rightNodeId = outerId;
+        }
       }
     } else if (visibleSpouses.length === 1) {
       leftNodeId = visibleSpouses[0];

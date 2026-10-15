@@ -168,12 +168,15 @@ export async function layoutExpanded(nodes: Node[], edges: Edge[]): Promise<Layo
         let curChildX = startX;
         if (inLawUnionIds.has(pu.id)) {
           let rightmostPlacedX = -Infinity;
-          for (const cid of children) {
-            const cPos = positionById.get(cid);
-            if (cPos && cPos.x > rightmostPlacedX) rightmostPlacedX = cPos.x;
+          for (const [id, pos] of positionById.entries()) {
+            const n = nodeById.get(id);
+            if (n && ((n.data as { generation?: number })?.generation ?? 1) === gen) {
+              const w = n.type === "union" ? UNION_NODE_SIZE : PERSON_NODE_WIDTH;
+              if (pos.x + w > rightmostPlacedX) rightmostPlacedX = pos.x + w;
+            }
           }
           if (rightmostPlacedX !== -Infinity) {
-            curChildX = rightmostPlacedX + PERSON_NODE_WIDTH + SIBLING_GAP;
+            curChildX = rightmostPlacedX + SIBLING_GAP;
           }
         }
         for (const cid of children) {
